@@ -1,0 +1,17 @@
+# Cloudflare Workers 配置。Phase 2 加上 D1 绑定后,本地 `wrangler dev`
+# 会自动起一个 SQLite 镜像存在 .wrangler/state/v3/d1/ 下,部署时再切到云端。
+
+name = "studio-workflow-manager-api"
+main = "src/index.ts"
+compatibility_date = "2025-01-15"
+compatibility_flags = ["nodejs_compat"]
+
+# 本地开发时,Access 不生效拿不到邮箱 header。auth.ts 会回退到这个值。
+[vars]
+DEV_USER_EMAIL = "shirleyljychina@gmail.com"
+
+# Phase 2 启用:绑定 D1 数据库
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "studio_db"
+# database_id = "TBD"  # 部署时由 `wrangler d1 create studio_db` 生成,填回这里
