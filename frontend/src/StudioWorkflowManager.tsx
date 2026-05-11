@@ -116,9 +116,30 @@ const DEFAULT_TASKS = [
   { id: 't_week_3', roleId: 'r9', name: '【内容】整理 2-3 个完整婚礼叙事案例', frequency: '临时', duration: '180', description: '【截止:5月12日】【优先级:高】整理故事线案例(非精选集),用于品牌展示和客户教育', dueDate: '2026-05-12', isWeekly: true },
 ];
 
+// 路由:每个 tab 一个 path。刷新页面能保持当前 tab。
+// 用原生 history API,不引外部 router。url ↔ activeTab 双向同步。
+const TAB_PATHS = ['today', 'weekly', 'roles', 'stats', 'trash', 'users'] as const;
+
+function readTabFromUrl(): string {
+  const seg = window.location.pathname.replace(/^\/+/, '').split('/')[0];
+  return (TAB_PATHS as readonly string[]).includes(seg) ? seg : 'today';
+}
+
 export default function StudioWorkflowManager() {
   const ti = useT();
-  const [activeTab, setActiveTab] = useState('today');
+  const [activeTab, setActiveTabState] = useState<string>(() => readTabFromUrl());
+  // 切 tab 同时更新 URL,让浏览器前进/后退可用,刷新还原。
+  const setActiveTab = (tab: string) => {
+    if (tab === activeTab) return;
+    window.history.pushState({ tab }, '', `/${tab}`);
+    setActiveTabState(tab);
+  };
+  // 监听浏览器前进/后退:把 URL 反向同步回 state。
+  useEffect(() => {
+    const handler = () => setActiveTabState(readTabFromUrl());
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, []);
   const [roles, setRoles] = useState(DEFAULT_ROLES);
   const [tasks, setTasks] = useState(DEFAULT_TASKS);
   const [completions, setCompletions] = useState({});
