@@ -16,6 +16,8 @@ import WeeklyView from './views/WeeklyView';
 import TrashView from './views/TrashView';
 import UsersView from './views/UsersView';
 import UserEditModal from './components/UserEditModal';
+import HeaderControls from './components/HeaderControls';
+import { useT } from './lib/i18n';
 
 const DEFAULT_ROLES = [
   { id: 'r1', name: '主摄影师', icon: '📸', isAssistant: false, supportsProjects: true, duties: '负责拍摄方案制定、现场拍摄主导、把控整体画面质量、与客户沟通拍摄需求', color: 'bg-blue-500' },
@@ -114,6 +116,7 @@ const DEFAULT_TASKS = [
 ];
 
 export default function StudioWorkflowManager() {
+  const ti = useT();
   const [activeTab, setActiveTab] = useState('today');
   const [roles, setRoles] = useState(DEFAULT_ROLES);
   const [tasks, setTasks] = useState(DEFAULT_TASKS);
@@ -580,61 +583,70 @@ export default function StudioWorkflowManager() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 dark:from-slate-950 to-slate-100 dark:to-slate-900 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-slate-400 dark:text-slate-500" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      <div className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-slate-800 to-slate-600 rounded-xl flex items-center justify-center">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 dark:from-slate-950 to-slate-100 dark:to-slate-900">
+      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-30 shadow-sm">
+        <div className="max-w-6xl mx-auto px-3 sm:px-4 py-3 sm:py-4">
+          <div className="flex items-center justify-between mb-3 sm:mb-4 gap-2">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+              <div className="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-br from-slate-800 to-slate-600 rounded-xl flex items-center justify-center shrink-0">
                 <Camera className="w-5 h-5 text-white" />
               </div>
-              <div>
-                <h1 className="text-xl font-bold text-slate-900">摄影工作室管理台</h1>
-                <p className="text-xs text-slate-500">全流程任务管理 · {roles.length}个职位 · {projects.length}个项目</p>
+              <div className="min-w-0">
+                <h1 className="text-base sm:text-xl font-bold text-slate-900 dark:text-slate-100 truncate">{ti('app_title')}</h1>
+                <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">{ti('app_subtitle_with_counts', { roles: roles.length, projects: projects.length })}</p>
               </div>
             </div>
-            <div className="flex items-center gap-3 text-sm">
-              <div className="text-right">
-                <div className="text-slate-500 text-xs">今日进度</div>
-                <div className="font-semibold text-slate-900">{completedToday}/{todayTasks.length}</div>
+            <div className="flex items-center gap-1.5 sm:gap-3 text-sm shrink-0">
+              <div className="text-right hidden md:block">
+                <div className="text-slate-500 dark:text-slate-400 text-xs">{ti('today_progress')}</div>
+                <div className="font-semibold text-slate-900 dark:text-slate-100">{completedToday}/{todayTasks.length}</div>
               </div>
-              <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center relative">
-                <svg className="w-12 h-12 transform -rotate-90 absolute">
-                  <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="3" fill="none" className="text-slate-200" />
-                  <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="3" fill="none"
-                    strokeDasharray={`${todayTasks.length > 0 ? (completedToday/todayTasks.length) * 125.6 : 0} 125.6`}
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center relative shrink-0" title={`${ti('today_progress')}: ${completedToday}/${todayTasks.length}`}>
+                <svg className="w-10 h-10 sm:w-12 sm:h-12 transform -rotate-90 absolute">
+                  <circle cx="50%" cy="50%" r="40%" stroke="currentColor" strokeWidth="3" fill="none" className="text-slate-200 dark:text-slate-700" />
+                  <circle cx="50%" cy="50%" r="40%" stroke="currentColor" strokeWidth="3" fill="none" pathLength={100}
+                    strokeDasharray={`${todayTasks.length > 0 ? (completedToday/todayTasks.length) * 100 : 0} 100`}
                     className="text-emerald-500 transition-all" />
                 </svg>
-                <span className="text-xs font-bold text-slate-700">
+                <span className="text-[10px] sm:text-xs font-bold text-slate-700 dark:text-slate-300">
                   {todayTasks.length > 0 ? Math.round((completedToday/todayTasks.length) * 100) : 0}%
                 </span>
               </div>
               {currentUser && (
-                <div className="border-l border-slate-200 pl-3 flex items-center gap-2">
+                <div className="sm:border-l sm:border-slate-200 sm:dark:border-slate-700 sm:pl-3 flex items-center gap-0.5 sm:gap-1">
                   <button
                     onClick={() => setShowSelfEdit(true)}
-                    className="text-right max-w-[160px] hover:bg-slate-100 rounded-lg px-2 py-1 -my-1"
-                    title="编辑我的显示名"
+                    className="text-right max-w-[160px] hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg px-2 py-1 -my-1 hidden sm:block"
+                    title={ti('edit_my_profile')}
                   >
-                    <div className="text-xs font-medium text-slate-700 truncate">
+                    <div className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate">
                       {currentUser.name || currentUser.email}
                     </div>
-                    <div className="text-xs text-slate-500 truncate">
-                      {currentUser.role === 'owner' ? 'Owner' : 'Assistant'}
-                      {currentUser.name && <span className="text-slate-400"> · {currentUser.email.split('@')[0]}</span>}
+                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                      {currentUser.role === 'owner' ? ti('user_owner') : ti('user_assistant')}
+                      {currentUser.name && <span className="text-slate-400 dark:text-slate-500"> · {currentUser.email.split('@')[0]}</span>}
                     </div>
                   </button>
+                  {/* 手机端:头像式按钮替代邮箱区,点击改名 */}
+                  <button
+                    onClick={() => setShowSelfEdit(true)}
+                    className={`sm:hidden w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-semibold shrink-0 ${currentUser.role === 'owner' ? 'bg-slate-900' : 'bg-amber-500'}`}
+                    title={ti('edit_my_profile')}
+                  >
+                    {(currentUser.name || currentUser.email)[0].toUpperCase()}
+                  </button>
+                  <HeaderControls />
                   <a
                     href="/cdn-cgi/access/logout"
-                    className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"
-                    title="退出登录"
+                    className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg text-slate-500 dark:text-slate-400"
+                    title={ti('sign_out')}
                   >
                     <LogOut className="w-4 h-4" />
                   </a>
@@ -643,30 +655,30 @@ export default function StudioWorkflowManager() {
             </div>
           </div>
 
-          <div className="flex gap-1 -mb-4 overflow-x-auto">
+          <div className="flex gap-1 -mb-3 sm:-mb-4 overflow-x-auto -mx-3 sm:mx-0 px-3 sm:px-0">
             {[
-              { id: 'today', label: '今日待办', icon: Calendar },
-              { id: 'weekly', label: '本周待办', icon: CalendarDays },
-              { id: 'roles', label: '职位职责', icon: Users },
-              { id: 'stats', label: '进度统计', icon: BarChart3 },
-              { id: 'trash', label: '回收站', icon: Archive, badge: trash.length },
-              ...(currentUser?.role === 'owner' ? [{ id: 'users', label: '团队', icon: UserCog }] : []),
+              { id: 'today', label: ti('tab_today'), icon: Calendar },
+              { id: 'weekly', label: ti('tab_weekly'), icon: CalendarDays },
+              { id: 'roles', label: ti('tab_roles'), icon: Users },
+              { id: 'stats', label: ti('tab_stats'), icon: BarChart3 },
+              { id: 'trash', label: ti('tab_trash'), icon: Archive, badge: trash.length },
+              ...(currentUser?.role === 'owner' ? [{ id: 'users', label: ti('tab_users'), icon: UserCog }] : []),
             ].map(tab => {
               const Icon = tab.icon;
               return (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                  className={`flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 sm:py-2.5 text-xs sm:text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                     activeTab === tab.id
-                      ? 'border-slate-900 text-slate-900'
-                      : 'border-transparent text-slate-500 hover:text-slate-700'
+                      ? 'border-slate-900 text-slate-900 dark:text-slate-100'
+                      : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-300'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
                   {tab.label}
                   {tab.badge > 0 && (
-                    <span className="text-xs px-1.5 py-0.5 bg-slate-200 text-slate-700 rounded-full">{tab.badge}</span>
+                    <span className="text-xs px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-full">{tab.badge}</span>
                   )}
                 </button>
               );
@@ -675,7 +687,7 @@ export default function StudioWorkflowManager() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 py-6">
+      <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
         {activeTab === 'today' && (
           <TodayView 
             todayTasks={todayTasks} roles={roles} completions={completions} todayKey={todayKey}
@@ -691,21 +703,21 @@ export default function StudioWorkflowManager() {
             tasks={tasks} roles={roles} completions={completions} todayKey={todayKey}
             updateCompletions={updateCompletions} splitTask={splitTask}
             onEdit={setEditingTask}
-            onDelete={(t) => {
+            onDelete={(task) => {
               setConfirmDialog({
-                title: `删除任务"${t.name}"?`,
-                message: `该任务将移至回收站,你可以在回收站中恢复或永久删除。`,
+                title: ti('confirm_title_delete_task', { name: task.name }),
+                message: ti('confirm_dialog_msg_task_delete'),
                 onConfirm: () => {
                   const relatedC = {};
                   Object.keys(completions).forEach(key => {
-                    if (key.startsWith(`${t.id}|`)) relatedC[key] = completions[key];
+                    if (key.startsWith(`${task.id}|`)) relatedC[key] = completions[key];
                   });
-                  moveToTrash('task', t, relatedC);
-                  updateTasks(tasks.filter(x => x.id !== t.id));
+                  moveToTrash('task', task, relatedC);
+                  updateTasks(tasks.filter(x => x.id !== task.id));
                   // 服务器 cascade 已清理 task_completions,本地只 set state(不 fire API,避免 404)
                   const cleaned = { ...completions };
                   Object.keys(cleaned).forEach(key => {
-                    if (key.startsWith(`${t.id}|`)) delete cleaned[key];
+                    if (key.startsWith(`${task.id}|`)) delete cleaned[key];
                   });
                   setCompletions(cleaned);
                   setConfirmDialog(null);
@@ -725,17 +737,22 @@ export default function StudioWorkflowManager() {
           <div>
             <div className="flex items-center justify-between mb-5">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">核心职位</h2>
-                <p className="text-sm text-slate-500 mt-0.5">点击职位查看拍摄项目和日常任务 · 共{roles.length}个职位</p>
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{ti('roles_list')}</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{ti('roles_list_subtitle_with_counts', { core: roles.filter(r => !r.isAssistant).length, assist: roles.filter(r => r.isAssistant).length })}</p>
               </div>
               <button onClick={() => setShowAddRole(true)}
                 className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 text-white text-sm rounded-lg hover:bg-slate-800 transition">
-                <Plus className="w-4 h-4" />添加职位
+                <Plus className="w-4 h-4" />{ti('add_role')}
               </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {roles.map(role => {
+              {(() => {
+                // 排序:核心职位(is_assistant=false)在前,助理职位在后。在边界插入分隔标题。
+                const sorted = [...roles].sort((a, b) => Number(!!a.isAssistant) - Number(!!b.isAssistant));
+                const firstAssistIdx = sorted.findIndex(r => r.isAssistant);
+                const hasBoth = firstAssistIdx > 0;
+                return sorted.flatMap((role, idx) => {
                 const linkedTasks = getLinkedTasksForRole(role.id);
                 const roleTasks = [...tasks.filter(t => t.roleId === role.id), ...linkedTasks];
                 const roleProjects = role.supportsProjects ? getVisibleProjectsForRole(role.id) : [];
@@ -756,8 +773,8 @@ export default function StudioWorkflowManager() {
                 const totalUncompleted = uncompletedDaily + uncompletedProjectTasks;
                 const isExpanded = expandedRole === role.id;
                 
-                return (
-                  <div key={role.id} className={`bg-white rounded-xl border overflow-hidden hover:shadow-md transition-shadow ${isExpanded ? 'md:col-span-2 border-slate-300' : 'border-slate-200'}`}>
+                const card = (
+                  <div key={role.id} className={`bg-white dark:bg-slate-900 rounded-xl border overflow-hidden hover:shadow-md transition-shadow ${isExpanded ? 'md:col-span-2 border-slate-300 dark:border-slate-600' : 'border-slate-200 dark:border-slate-700'}`}>
                     <div className="p-4 cursor-pointer" onClick={() => setExpandedRole(isExpanded ? null : role.id)}>
                       <div className="flex items-start gap-3">
                         <div className={`w-10 h-10 rounded-lg ${role.color} flex items-center justify-center text-lg shrink-0`}>
@@ -765,20 +782,20 @@ export default function StudioWorkflowManager() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <h3 className="font-semibold text-slate-900">{role.name}</h3>
-                            {role.isAssistant && <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">助理</span>}
-                            {totalUncompleted > 0 && <span className="ml-auto text-xs px-2 py-0.5 bg-rose-500 text-white rounded-full font-medium">{totalUncompleted} 待办</span>}
+                            <h3 className="font-semibold text-slate-900 dark:text-slate-100">{role.name}</h3>
+                            {role.isAssistant && <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">{ti('assistant_short')}</span>}
+                            {totalUncompleted > 0 && <span className="ml-auto text-xs px-2 py-0.5 bg-rose-500 text-white rounded-full font-medium">{ti('n_pending', { n: totalUncompleted })}</span>}
                             {totalUncompleted === 0 && (roleTasks.length > 0 || roleProjects.length > 0) && (
                               <span className="ml-auto text-xs text-emerald-600 flex items-center gap-1">
-                                <CheckCircle2 className="w-3 h-3" />全部完成
+                                <CheckCircle2 className="w-3 h-3" />{ti('all_done')}
                               </span>
                             )}
                           </div>
-                          <p className="text-sm text-slate-600 line-clamp-2">{role.duties}</p>
-                          <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
-                            <span>{roleTasks.length} 日常任务</span>
-                            {role.supportsProjects && <span>· {roleProjects.length} 拍摄项目</span>}
-                            {role.id === 'r5' && <span>· {albumDesigns.length} 相册设计</span>}
+                          <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">{role.duties}</p>
+                          <div className="flex items-center gap-3 mt-2 text-xs text-slate-500 dark:text-slate-400">
+                            <span>{ti('n_daily_tasks', { n: roleTasks.length })}</span>
+                            {role.supportsProjects && <span>· {ti('n_shoot_projects', { n: roleProjects.length })}</span>}
+                            {role.id === 'r5' && <span>· {ti('n_albums', { n: albumDesigns.length })}</span>}
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
@@ -787,8 +804,8 @@ export default function StudioWorkflowManager() {
                               onClick={(e) => { 
                                 e.stopPropagation(); 
                                 setConfirmDialog({
-                                  title: `删除职位"${role.name}"?`,
-                                  message: `该职位下的相关任务也会一并放入回收站,你可以稍后在回收站中恢复。`,
+                                  title: ti('confirm_title_delete_role', { name: role.name }),
+                                  message: ti('confirm_dialog_msg_role_delete'),
                                   onConfirm: () => {
                                     const roleRelatedTasks = tasks.filter(t => t.roleId === role.id);
                                     moveToTrash('role', { role, tasks: roleRelatedTasks });
@@ -800,53 +817,53 @@ export default function StudioWorkflowManager() {
                                 });
                               }}
                               className="p-2 hover:bg-rose-50 rounded-lg text-rose-500 transition-colors"
-                              title="删除整个职位"
+                              title={ti('delete_whole_role')}
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           )}
-                          {isExpanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+                          {isExpanded ? <ChevronDown className="w-4 h-4 text-slate-400 dark:text-slate-500" /> : <ChevronRight className="w-4 h-4 text-slate-400 dark:text-slate-500" />}
                         </div>
                       </div>
                     </div>
 
                     {isExpanded && (
-                      <div className="border-t border-slate-100 bg-slate-50">
-                        <div className="p-4 border-b border-slate-200 bg-white">
+                      <div className="border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+                        <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
                           <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">职责详情</span>
-                            <button onClick={(e) => { e.stopPropagation(); setEditingRole(role); }} className="p-1.5 hover:bg-slate-100 rounded text-slate-500" title="编辑">
+                            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">{ti('role_duties')}</span>
+                            <button onClick={(e) => { e.stopPropagation(); setEditingRole(role); }} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500 dark:text-slate-400" title={ti('edit')}>
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
-                          <p className="text-sm text-slate-700">{role.duties}</p>
+                          <p className="text-sm text-slate-700 dark:text-slate-300">{role.duties}</p>
                         </div>
 
                         {role.supportsProjects && (
-                          <div className="p-4 border-b border-slate-200 bg-blue-50/30">
+                          <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-blue-50/30">
                             <div className="flex items-center justify-between mb-2.5">
                               <div className="flex items-center gap-2">
                                 <Camera className="w-4 h-4 text-blue-600" />
-                                <span className="text-sm font-semibold text-slate-800">拍摄项目</span>
-                                {role.id === 'r2' && <span className="text-xs px-1.5 py-0.5 bg-cyan-100 text-cyan-700 rounded">🔗 婚礼联动</span>}
-                                {role.id === 'r3' && <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">🔗 自动联动</span>}
-                                {uncompletedProjectTasks > 0 && <span className="text-xs px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded">{uncompletedProjectTasks} 待办</span>}
+                                <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">{ti('shoot_projects')}</span>
+                                {role.id === 'r2' && <span className="text-xs px-1.5 py-0.5 bg-cyan-100 text-cyan-700 rounded">{ti('wedding_linked_badge')}</span>}
+                                {role.id === 'r3' && <span className="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">{ti('auto_linked_badge')}</span>}
+                                {uncompletedProjectTasks > 0 && <span className="text-xs px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded">{ti('n_pending', { n: uncompletedProjectTasks })}</span>}
                               </div>
                               {role.id !== 'r3' && role.id !== 'r2' && (
                                 <button onClick={(e) => { e.stopPropagation(); setShowAddProject(role.id); }}
                                   className="text-xs text-white bg-blue-600 hover:bg-blue-700 flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-medium">
-                                  <Plus className="w-3.5 h-3.5" />新增拍摄
+                                  <Plus className="w-3.5 h-3.5" />{ti('add_shoot')}
                                 </button>
                               )}
                             </div>
                             {roleProjects.length === 0 ? (
-                              <div className="bg-white rounded-lg border border-dashed border-slate-300 p-6 text-center">
-                                <Camera className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                                <p className="text-sm text-slate-500">
-                                  {role.id === 'r3' ? '暂无可修图项目' : role.id === 'r2' ? '暂无婚礼项目' : '暂无拍摄项目'}
+                              <div className="bg-white dark:bg-slate-900 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-6 text-center">
+                                <Camera className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                                <p className="text-sm text-slate-500 dark:text-slate-400">
+                                  {role.id === 'r3' ? ti('no_retouchable_projects') : role.id === 'r2' ? ti('no_wedding_projects') : ti('no_shoot_projects')}
                                 </p>
-                                <p className="text-xs text-slate-400 mt-1">
-                                  {role.id === 'r3' ? '主摄完成所有拍摄任务后,项目会自动出现在这里' : role.id === 'r2' ? '主摄添加婚礼类型拍摄后,项目会自动出现在这里' : '点击"新增拍摄"添加客户项目'}
+                                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                                  {role.id === 'r3' ? ti('main_photographer_done_hint') : role.id === 'r2' ? ti('no_wedding_projects_hint') : ti('add_shoot_hint')}
                                 </p>
                               </div>
                             ) : (
@@ -859,8 +876,8 @@ export default function StudioWorkflowManager() {
                                     onEdit={() => setEditingProject(p)}
                                     onDelete={() => {
                                       setConfirmDialog({
-                                        title: `删除项目"${p.clientName} - ${p.shootType}"?`,
-                                        message: `该项目将移至回收站,你可以在回收站中恢复或永久删除。`,
+                                        title: ti('confirm_title_delete_project', { name: `${p.clientName} - ${p.shootType}` }),
+                                        message: ti('confirm_dialog_msg_project_delete'),
                                         onConfirm: () => {
                                           const relatedC = {};
                                           Object.keys(projectCompletions).forEach(key => {
@@ -886,11 +903,11 @@ export default function StudioWorkflowManager() {
                         )}
 
                         {role.id === 'r5' && (
-                          <div className="p-4 border-b border-slate-200 bg-amber-50/30">
+                          <div className="p-4 border-b border-slate-200 dark:border-slate-700 bg-amber-50/30">
                             <div className="flex items-center justify-between mb-2.5">
                               <div className="flex items-center gap-2">
                                 <Briefcase className="w-4 h-4 text-amber-600" />
-                                <span className="text-sm font-semibold text-slate-800">相册设计</span>
+                                <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">{ti('album_design')}</span>
                                 {(() => {
                                   const todoCount = albumDesigns.reduce((sum, a) => {
                                     const aTasks = getAlbumTasks(a);
@@ -901,14 +918,14 @@ export default function StudioWorkflowManager() {
                               </div>
                               <button onClick={(e) => { e.stopPropagation(); setShowAddAlbum(true); }}
                                 className="text-xs text-white bg-amber-600 hover:bg-amber-700 flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-medium">
-                                <Plus className="w-3.5 h-3.5" />新增设计
+                                <Plus className="w-3.5 h-3.5" />{ti('add_album')}
                               </button>
                             </div>
                             {albumDesigns.length === 0 ? (
-                              <div className="bg-white rounded-lg border border-dashed border-slate-300 p-6 text-center">
-                                <Briefcase className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                                <p className="text-sm text-slate-500">暂无相册设计</p>
-                                <p className="text-xs text-slate-400 mt-1">点击"新增设计"添加相册定制项目</p>
+                              <div className="bg-white dark:bg-slate-900 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-6 text-center">
+                                <Briefcase className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                                <p className="text-sm text-slate-500 dark:text-slate-400">{ti('no_albums')}</p>
+                                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">{ti('add_album_hint')}</p>
                               </div>
                             ) : (
                               <div className="space-y-2">
@@ -920,8 +937,8 @@ export default function StudioWorkflowManager() {
                                     onEdit={() => setEditingAlbum(album)}
                                     onDelete={() => {
                                       setConfirmDialog({
-                                        title: `删除相册设计"${album.clientName}"?`,
-                                        message: `该相册设计将移至回收站,你可以在回收站中恢复或永久删除。`,
+                                        title: ti('confirm_title_delete_album', { name: album.clientName }),
+                                        message: ti('confirm_dialog_msg_album_delete'),
                                         onConfirm: () => {
                                           const relatedC = {};
                                           Object.keys(albumCompletions).forEach(key => {
@@ -948,18 +965,18 @@ export default function StudioWorkflowManager() {
                         <div className="p-4">
                           <div className="flex items-center justify-between mb-2.5">
                             <div className="flex items-center gap-2">
-                              <ListTodo className="w-4 h-4 text-slate-600" />
-                              <span className="text-sm font-semibold text-slate-700">日常任务清单</span>
-                              {role.id === 'r7' && linkedTasks.length > 0 && <span className="text-xs px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded">🔗 含项目联动</span>}
+                              <ListTodo className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+                              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">{ti('daily_tasks')}</span>
+                              {role.id === 'r7' && linkedTasks.length > 0 && <span className="text-xs px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded">{ti('contains_project_linked')}</span>}
                               {uncompletedDaily > 0 && <span className="text-xs px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded">{uncompletedDaily} 待办</span>}
                             </div>
                             <button onClick={(e) => { e.stopPropagation(); setShowAddTask(role.id); }}
-                              className="text-xs text-slate-700 hover:text-slate-900 flex items-center gap-1 px-2 py-1 hover:bg-white rounded">
-                              <Plus className="w-3 h-3" />添加任务
+                              className="text-xs text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:text-slate-100 flex items-center gap-1 px-2 py-1 hover:bg-white dark:hover:bg-slate-700 dark:bg-slate-900 rounded">
+                              <Plus className="w-3 h-3" />{ti('add_task')}
                             </button>
                           </div>
                           {roleTasks.length === 0 ? (
-                            <p className="text-xs text-slate-400 italic py-2">暂无日常任务,点击添加</p>
+                            <p className="text-xs text-slate-400 dark:text-slate-500 italic py-2">{ti('no_daily_tasks_yet')}</p>
                           ) : (
                             <div className="space-y-1.5">
                               {roleTasks.map(t => {
@@ -971,38 +988,38 @@ export default function StudioWorkflowManager() {
                                   (t.frequency === '每月' && new Date().getDate() === (t.monthday ?? 1));
                                 
                                 return (
-                                  <div key={t.id} className={`bg-white rounded-lg p-2.5 flex items-center gap-2.5 ${isLinked ? 'border border-rose-200 bg-rose-50/30' : (isToday && !isCompleted ? 'border border-blue-200' : '')}`}>
+                                  <div key={t.id} className={`bg-white dark:bg-slate-900 rounded-lg p-2.5 flex items-center gap-2.5 ${isLinked ? 'border border-rose-200 bg-rose-50/30' : (isToday && !isCompleted ? 'border border-blue-200' : '')}`}>
                                     <button onClick={(e) => { e.stopPropagation(); updateCompletions({ ...completions, [completionKey]: !isCompleted }); }}
-                                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
+                                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 dark:border-slate-600'}`}>
                                       {isCompleted && <Check className="w-3 h-3 text-white" />}
                                     </button>
                                     <div className="flex-1 min-w-0">
-                                      <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 line-through' : 'text-slate-800'} truncate`}>{t.name}</div>
-                                      <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5 flex-wrap">
+                                      <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-800 dark:text-slate-200'} truncate`}>{t.name}</div>
+                                      <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5 flex-wrap">
                                         {isLinked ? (
-                                          <span className="px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded font-medium">🔗 项目联动</span>
+                                          <span className="px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded font-medium">{ti('project_linked')}</span>
                                         ) : (
-                                          <span className="px-1.5 py-0.5 bg-slate-100 rounded">{t.frequency}</span>
+                                          <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded">{t.frequency}</span>
                                         )}
-                                        {t.duration && <span>{t.duration}分钟</span>}
-                                        {!isLinked && isToday && !isCompleted && <span className="text-blue-600 font-medium">· 今日</span>}
+                                        {t.duration && <span>{t.duration}{ti('minutes')}</span>}
+                                        {!isLinked && isToday && !isCompleted && <span className="text-blue-600 font-medium">· {ti('today')}</span>}
                                       </div>
                                     </div>
                                     {import.meta.env.DEV && (
-                                      <button onClick={(e) => { e.stopPropagation(); splitTask(t); }} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="AI拆分">
+                                      <button onClick={(e) => { e.stopPropagation(); splitTask(t); }} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-600 dark:text-slate-400" title={ti('ai_split')}>
                                         <Sparkles className="w-3.5 h-3.5" />
                                       </button>
                                     )}
                                     {!isLinked && (
                                       <>
-                                        <button onClick={(e) => { e.stopPropagation(); setEditingTask(t); }} className="p-1.5 hover:bg-slate-100 rounded text-slate-500" title="编辑">
+                                        <button onClick={(e) => { e.stopPropagation(); setEditingTask(t); }} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500 dark:text-slate-400" title={ti('edit')}>
                                           <Edit2 className="w-3.5 h-3.5" />
                                         </button>
                                         <button onClick={(e) => { 
                                           e.stopPropagation();
                                           setConfirmDialog({
-                                            title: `删除任务"${t.name}"?`,
-                                            message: `该任务将移至回收站,你可以在回收站中恢复或永久删除。`,
+                                            title: ti('confirm_title_delete_task', { name: t.name }),
+                                            message: ti('confirm_dialog_msg_task_delete'),
                                             onConfirm: () => {
                                               const relatedC = {};
                                               Object.keys(completions).forEach(key => {
@@ -1019,7 +1036,7 @@ export default function StudioWorkflowManager() {
                                               setConfirmDialog(null);
                                             }
                                           });
-                                        }} className="p-1.5 hover:bg-rose-50 rounded text-rose-500" title="删除">
+                                        }} className="p-1.5 hover:bg-rose-50 rounded text-rose-500" title={ti('delete')}>
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
                                       </>
@@ -1034,36 +1051,49 @@ export default function StudioWorkflowManager() {
                     )}
                   </div>
                 );
-              })}
+                if (hasBoth && idx === firstAssistIdx) {
+                  return [
+                    <div key="__asst_divider" className="md:col-span-2 mt-2 pt-3 border-t border-slate-200 dark:border-slate-700">
+                      <h3 className="text-sm font-semibold text-amber-700 flex items-center gap-1.5">
+                        <span>👥</span>{ti('assistant_roles')}
+                        <span className="text-xs text-slate-500 dark:text-slate-400 font-normal">— {ti('assistant_role_section_hint', { n: sorted.length - firstAssistIdx })}</span>
+                      </h3>
+                    </div>,
+                    card,
+                  ];
+                }
+                return [card];
+                });
+              })()}
             </div>
           </div>
         )}
 
         {activeTab === 'stats' && (
           <div>
-            <h2 className="text-lg font-semibold text-slate-900 mb-5">进度统计</h2>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-5">{ti('tab_stats')}</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-              <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="text-xs text-slate-500 mb-1">职位总数</div>
-                <div className="text-2xl font-bold text-slate-900">{roles.length}</div>
+              <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">{ti('stat_total_roles')}</div>
+                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">{roles.length}</div>
               </div>
-              <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="text-xs text-slate-500 mb-1">任务总数</div>
-                <div className="text-2xl font-bold text-slate-900">{tasks.length}</div>
+              <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">{ti('stat_total_tasks')}</div>
+                <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">{tasks.length}</div>
               </div>
-              <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="text-xs text-slate-500 mb-1">拍摄项目</div>
+              <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">{ti('stat_projects')}</div>
                 <div className="text-2xl font-bold text-blue-600">{projects.length}</div>
               </div>
-              <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="text-xs text-slate-500 mb-1">今日完成率</div>
+              <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">{ti('stat_today_rate')}</div>
                 <div className="text-2xl font-bold text-emerald-600">
                   {todayTasks.length > 0 ? Math.round((completedToday/todayTasks.length) * 100) : 0}%
                 </div>
               </div>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-5">
-              <h3 className="font-semibold text-slate-900 mb-4">各职位今日完成进度</h3>
+            <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-5">
+              <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-4">{ti('stat_role_progress')}</h3>
               <div className="space-y-3">
                 {roles.map(role => {
                   const roleTasksAll = tasks.filter(t => t.roleId === role.id);
@@ -1075,13 +1105,13 @@ export default function StudioWorkflowManager() {
                       <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center gap-2 text-sm">
                           <span>{role.icon}</span>
-                          <span className="text-slate-700">{role.name}</span>
-                          {role.isAssistant && <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">助理</span>}
+                          <span className="text-slate-700 dark:text-slate-300">{role.name}</span>
+                          {role.isAssistant && <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">{ti('assistant_short')}</span>}
                         </div>
-                        <span className="text-sm font-medium text-slate-900">{done}/{total} · {pct}%</span>
+                        <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{done}/{total} · {pct}%</span>
                       </div>
-                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                        <div className={`h-full ${total > 0 ? role.color : 'bg-slate-200'} transition-all`} style={{ width: `${pct}%` }} />
+                      <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                        <div className={`h-full ${total > 0 ? role.color : 'bg-slate-200 dark:bg-slate-700'} transition-all`} style={{ width: `${pct}%` }} />
                       </div>
                     </div>
                   );
@@ -1092,7 +1122,13 @@ export default function StudioWorkflowManager() {
         )}
 
         {activeTab === 'users' && currentUser?.role === 'owner' && (
-          <UsersView roles={roles} currentEmail={currentUser.email} onSelfUpdate={setCurrentUser} />
+          <UsersView
+            roles={roles}
+            currentEmail={currentUser.email}
+            currentRole={currentUser.role}
+            onSelfUpdate={setCurrentUser}
+            setConfirmDialog={setConfirmDialog}
+          />
         )}
       </div>
 

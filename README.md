@@ -147,6 +147,26 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 **时区**
 - Worker 永远跑 UTC。前端 `localDateParams()` 拼出本地 TZ 的 `date=YYYY-MM-DD&dow=N&dom=N` 传给 bootstrap / tasks/today / tasks/weekly,后端识别这些参数后用它们,缺省时 fallback UTC
 
+**手机端响应式**
+- 顶栏在 `< sm`(< 640px,即手机宽度)自动简化:隐藏副标题 / 隐藏「今日进度 0/3」文本(只留进度环)/ 邮箱用户区折叠成头像式圆形按钮(点击改名)/ 内边距和字体整体缩小
+- Tab 栏在窄屏自动横向滚动,字号/padding 缩小
+- 主内容区 `px-3 sm:px-4 py-4 sm:py-6` 在小屏紧凑
+- Modal 已经是 `w-full max-w-md`,自动占满手机宽度
+- 进度环 SVG 用 `pathLength={100}` + 百分比半径,可缩放(`w-10 sm:w-12`)
+- 触控目标全部 ≥ 32px (`p-2` 包裹的 icon)
+
+**Dark mode + i18n**
+- Tailwind v4 `@custom-variant dark` 启用 class 策略,顶栏右上 🌙 / ☀️ 切换;localStorage 持久化 + 首次访问读 `prefers-color-scheme`
+- 所有 slate-* / hover:slate-* 颜色都加了 `dark:` 变体(批量 perl 脚本);五彩状态色(蓝/绿/玫)保持不变
+- `lib/i18n.ts` 简易字典(zh/en),`useT()` hook,顶栏 中/EN toggle;**全站 UI 覆盖**(~200 个 key):tabs / headers / 按钮 / 表单 label / Modal 标题 / Confirm Dialog 文案 / Toast 错误 / 空态提示 / Today TIME_SLOTS / Weekly priority labels / Trash 时间段说明 / Users 邀请流程
+- 用户数据(role 名、task 名、客户名、项目备注)保留原文 — 这些是 DB 数据,owner 可自行编辑成英文
+- 状态共享:`prefs.ts` 用 `useSyncExternalStore` 模块级 store,所有组件同步响应 locale / theme 切换
+
+**`is_assistant` 标志**
+- `roles.is_assistant` 表示"这是个一般委派给助理负责的职位"(默认 r4 广告设计 / r7 Marketing / r10 财务)
+- 视觉效果:职位职责 tab 自动把核心职位排在前、助理职位归到下方"助理职位"分组;UserEditModal 选择职位时助理标签可见
+- 它不影响访问控制(那是 `users.role` + `users.assigned_roles` 的事)
+
 **软删 + 30 天回收站**
 - 所有 DELETE 走 `moveToTrash()`:把完整 JSON 存 `trash.item_data`,关联完成记录存 `related_data`,30 天后 `GET /api/trash` lazy 清理
 - 恢复:`POST /api/trash/:id/restore` 反向 INSERT 回原表 + 完成记录回写;客户端 setState 直接读 `itemData`,不再走 `updateXxx` diff(避免重复 API 调用)
@@ -184,6 +204,11 @@ cd backend && npm run db:apply:remote
 1. Cloudflare Zero Trust → Access controls → Applications → 这个 app → Policies → 添加他们邮箱
 2. 队友访问 https://studio-workflow-manager.pages.dev → 收 OTP 登录
 3. 你打开「团队」tab(右上 owner-only),刷新 → 看到新成员 → 点编辑 → 勾选他能管的职位 → 保存
+
+**移除队友:**
+- 团队 tab 里点用户旁的🗑️按钮(owner-only,不能删自己)— 从应用 DB 移除用户
+- ⚠️ 这**不**阻止他登录;若要彻底拒绝,需去 Access 控制台从 Policy 邮箱白名单移除
+- 否则他下次登录会重新被建为 assistant(`assignedRoles=[]`,看不到任何内容)
 
 ---
 

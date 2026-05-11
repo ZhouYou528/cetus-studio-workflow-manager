@@ -62,4 +62,23 @@ app.patch('/:email', requireOwner, async (c) => {
   return c.json(updated);
 });
 
+// 删除用户(仅 owner)
+// 注意:这只清掉本 DB 里的用户记录。若想完全拒绝该邮箱登录,还需在 Cloudflare Zero Trust
+// → Access controls → Applications → Policies 里把邮箱从白名单移除。
+// 否则该用户下次登录会重新被建为 assistant(assignedRoles=[]),看不到任何东西。
+app.delete('/:email', requireOwner, async (c) => {
+  const email = decodeURIComponent(c.req.param('email'));
+
+  // 安全:owner 不能删自己,避免误降权后没法管理
+  if (email === c.var.user.email) {
+    return c.json({ error: 'cannot_delete_self' }, 400);
+  }
+
+  const existing = await one(c, `SELECT email FROM users WHERE email = ?`, email);
+  if (!existing) return c.json({ error: 'not_found' }, 404);
+
+  await c.env.DB.prepare(`DELETE FROM users WHERE email = ?`).bind(email).run();
+  return c.json({ ok: true });
+});
+
 export default app;

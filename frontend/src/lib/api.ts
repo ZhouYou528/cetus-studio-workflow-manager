@@ -96,6 +96,8 @@ export const api = {
   listUsers: () => call<{ users: User[] }>('GET', '/api/users'),
   updateUser: (email: string, body: Partial<Pick<User, 'role' | 'assignedRoles' | 'name'>>) =>
     call<User>('PATCH', `/api/users/${encodeURIComponent(email)}`, body),
+  deleteUser: (email: string) =>
+    call<{ ok: true }>('DELETE', `/api/users/${encodeURIComponent(email)}`),
 
   // roles
   createRole: (body: Partial<Role>) => call<Role>('POST', '/api/roles', body),
