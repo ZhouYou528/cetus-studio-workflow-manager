@@ -70,20 +70,31 @@ export type Bootstrap = {
   albumCompletions: Record<string, number>;
 };
 
+// 用户本地时区下的"今天"。后端 Worker 跑在 UTC,前端需要把本机的
+// date / 星期几 / 月日 一起带过去,避免跨日边界出现"今天"对不上。
+function localDateParams(): string {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const date = `${yyyy}-${mm}-${dd}`;
+  return `date=${date}&dow=${d.getDay()}&dom=${d.getDate()}`;
+}
+
 // ── endpoints ────────────────────────────────────────────
 export const api = {
-  bootstrap: () => call<Bootstrap>('GET', '/api/bootstrap'),
+  bootstrap: () => call<Bootstrap>('GET', `/api/bootstrap?${localDateParams()}`),
   me: () => call<User>('GET', '/api/me'),
 
   // roles
   createRole: (body: Partial<Role>) => call<Role>('POST', '/api/roles', body),
   updateRole: (id: string, body: Partial<Role>) => call<Role>('PATCH', `/api/roles/${id}`, body),
-  deleteRole: (id: string) => call<{ ok: true }>('DELETE', `/api/roles/${id}`),
+  deleteRole: (id: string) => call<{ ok: true; trashId: string }>('DELETE', `/api/roles/${id}`),
 
   // tasks
   createTask: (body: Partial<Task>) => call<Task>('POST', '/api/tasks', body),
   updateTask: (id: string, body: Partial<Task>) => call<Task>('PATCH', `/api/tasks/${id}`, body),
-  deleteTask: (id: string) => call<{ ok: true }>('DELETE', `/api/tasks/${id}`),
+  deleteTask: (id: string) => call<{ ok: true; trashId: string }>('DELETE', `/api/tasks/${id}`),
   completeTask: (id: string, date: string) =>
     call<{ ok: true }>('POST', `/api/tasks/${id}/complete`, { date }),
   uncompleteTask: (id: string, date: string) =>
@@ -92,7 +103,7 @@ export const api = {
   // projects
   createProject: (body: Partial<Project>) => call<Project>('POST', '/api/projects', body),
   updateProject: (id: string, body: Partial<Project>) => call<Project>('PATCH', `/api/projects/${id}`, body),
-  deleteProject: (id: string) => call<{ ok: true }>('DELETE', `/api/projects/${id}`),
+  deleteProject: (id: string) => call<{ ok: true; trashId: string }>('DELETE', `/api/projects/${id}`),
   completeProjectTask: (projectId: string, templateId: string, roleId: string) =>
     call<{ ok: true }>('POST', `/api/projects/${projectId}/tasks/${templateId}/complete`, { roleId }),
   uncompleteProjectTask: (projectId: string, templateId: string, roleId: string) =>
@@ -101,7 +112,7 @@ export const api = {
   // albums
   createAlbum: (body: Partial<Album>) => call<Album>('POST', '/api/albums', body),
   updateAlbum: (id: string, body: Partial<Album>) => call<Album>('PATCH', `/api/albums/${id}`, body),
-  deleteAlbum: (id: string) => call<{ ok: true }>('DELETE', `/api/albums/${id}`),
+  deleteAlbum: (id: string) => call<{ ok: true; trashId: string }>('DELETE', `/api/albums/${id}`),
   completeAlbumTask: (albumId: string, templateId: string) =>
     call<{ ok: true }>('POST', `/api/albums/${albumId}/tasks/${templateId}/complete`, {}),
   uncompleteAlbumTask: (albumId: string, templateId: string) =>

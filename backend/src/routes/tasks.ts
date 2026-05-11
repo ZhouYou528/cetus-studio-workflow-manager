@@ -53,12 +53,16 @@ app.get('/', async (c) => {
 //   - '临时' 不在此处展示,归 WeeklyView
 // 前端 TodayView 负责按时间段(r3/r6/r4+r5/r7/其他)分组。
 //
-// 时区:服务器永远是 UTC。如果用户在客户端 TZ 看到的"今天"和服务器不一致,
-// Phase 5 可考虑前端传 ?date= 和 ?dow= 覆盖。当前先按 UTC。
+// 时区:Worker 跑在 UTC。前端可传 ?date=YYYY-MM-DD&dow=N&dom=N 覆盖本地时区,
+// 任一参数缺失或非法时 fallback UTC 推断。
 app.get('/today', async (c) => {
-  const todayKey = new Date().toISOString().split('T')[0];
-  const dow = new Date().getUTCDay(); // 0=Sun..6=Sat
-  const dom = new Date().getUTCDate();
+  const qDate = c.req.query('date');
+  const qDow = c.req.query('dow');
+  const qDom = c.req.query('dom');
+  const now = new Date();
+  const todayKey = qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate) ? qDate : now.toISOString().split('T')[0];
+  const dow = qDow !== undefined ? parseInt(qDow, 10) : now.getUTCDay();
+  const dom = qDom !== undefined ? parseInt(qDom, 10) : now.getUTCDate();
 
   const binds: unknown[] = [dow, dom];
   let where = `(
@@ -91,7 +95,8 @@ app.get('/today', async (c) => {
 // GET /api/tasks/weekly
 // 仅 is_weekly=1 的临时任务。按 due_date 升序;前端按职位分组。
 app.get('/weekly', async (c) => {
-  const todayKey = new Date().toISOString().split('T')[0];
+  const qDate = c.req.query('date');
+  const todayKey = qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate) ? qDate : new Date().toISOString().split('T')[0];
   const binds: unknown[] = [];
   let where = `is_weekly = 1`;
   where += visibleClause('', c.var.user, binds);
@@ -238,13 +243,13 @@ app.delete('/:id', async (c) => {
   }
 
   const compls = await all(c, `SELECT * FROM task_completions WHERE task_id = ?`, id);
-  await moveToTrash(c, 'task', task, { task_completions: compls });
+  const trashId = await moveToTrash(c, 'task', task, { task_completions: compls });
 
   await c.env.DB.batch([
     c.env.DB.prepare(`DELETE FROM task_completions WHERE task_id = ?`).bind(id),
     c.env.DB.prepare(`DELETE FROM tasks WHERE id = ?`).bind(id),
   ]);
-  return c.json({ ok: true });
+  return c.json({ ok: true, trashId });
 });
 
 // ── 完成 / 取消完成(按日期) ────────────────────────────

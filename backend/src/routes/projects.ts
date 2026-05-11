@@ -78,13 +78,13 @@ app.delete('/:id', async (c) => {
   if (!project) return c.json({ error: 'not_found' }, 404);
 
   const compls = await all(c, `SELECT * FROM project_completions WHERE project_id = ?`, id);
-  await moveToTrash(c, 'project', project, { project_completions: compls });
+  const trashId = await moveToTrash(c, 'project', project, { project_completions: compls });
 
   await c.env.DB.batch([
     c.env.DB.prepare(`DELETE FROM project_completions WHERE project_id = ?`).bind(id),
     c.env.DB.prepare(`DELETE FROM projects WHERE id = ?`).bind(id),
   ]);
-  return c.json({ ok: true });
+  return c.json({ ok: true, trashId });
 });
 
 // ── 项目子任务 ──────────────────────────────────────────

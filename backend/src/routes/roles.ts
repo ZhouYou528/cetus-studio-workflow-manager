@@ -108,7 +108,7 @@ app.delete('/:id', requireOwner, async (c) => {
   if (!role) return c.json({ error: 'not_found' }, 404);
 
   const tasks = await all(c, `SELECT * FROM tasks WHERE role_id = ?`, id);
-  await moveToTrash(c, 'role', { role, tasks }, null);
+  const trashId = await moveToTrash(c, 'role', { role, tasks }, null);
 
   // 物理删除(回收站里 item_data 保留了 JSON)
   await c.env.DB.batch([
@@ -116,7 +116,7 @@ app.delete('/:id', requireOwner, async (c) => {
     c.env.DB.prepare(`DELETE FROM tasks WHERE role_id = ?`).bind(id),
     c.env.DB.prepare(`DELETE FROM roles WHERE id = ?`).bind(id),
   ]);
-  return c.json({ ok: true });
+  return c.json({ ok: true, trashId });
 });
 
 export default app;

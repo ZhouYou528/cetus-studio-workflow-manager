@@ -3,6 +3,17 @@
 import React, { useState, useEffect } from 'react';
 import { api, ApiError } from './lib/api';
 import { Camera, Users, ListTodo, Bell, BarChart3, Plus, Edit2, Trash2, Check, X, ChevronDown, ChevronRight, Clock, AlertCircle, CheckCircle2, Calendar, Briefcase, Sparkles, Loader2, FolderOpen, MapPin, User, CalendarDays, Archive } from 'lucide-react';
+import ConfirmDialog from './components/ConfirmDialog';
+import RoleModal from './components/RoleModal';
+import TaskModal from './components/TaskModal';
+import ProjectModal from './components/ProjectModal';
+import AlbumModal from './components/AlbumModal';
+import SplitModal from './components/SplitModal';
+import ProjectCard from './components/ProjectCard';
+import AlbumCard from './components/AlbumCard';
+import TodayView from './views/TodayView';
+import WeeklyView from './views/WeeklyView';
+import TrashView from './views/TrashView';
 
 const DEFAULT_ROLES = [
   { id: 'r1', name: '主摄影师', icon: '📸', isAssistant: false, supportsProjects: true, duties: '负责拍摄方案制定、现场拍摄主导、把控整体画面质量、与客户沟通拍摄需求', color: 'bg-blue-500' },
@@ -184,32 +195,53 @@ export default function StudioWorkflowManager() {
   });
 
   // ── 8 个标准 updateXxx ────────────────────────────────
+  // 删除时,服务器返回的 trashId 用来把本地乐观 trash 占位项替换成真实 id,
+  // 让用户删除完立刻就能恢复(不用等 1 秒 refresh)。
+  const promoteTrash = (localId, trashId, item) =>
+    setTrash(prev => prev.map(t => t.id === localId ? { ...t, id: trashId, _local: false } : t));
+
+  const findLocalTrashId = (type, itemId) => {
+    const m = trash.find(t => t._local && t.type === type && t.item?.id === itemId);
+    return m?.id;
+  };
+
+  const handleDelete = (type, id) => async () => {
+    const localId = findLocalTrashId(type, id);
+    const fn = { role: api.deleteRole, task: api.deleteTask, project: api.deleteProject, album: api.deleteAlbum }[type];
+    try {
+      const res = await fn(id);
+      if (localId && res?.trashId) promoteTrash(localId, res.trashId, null);
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.status !== 404) console.error(e);
+    }
+  };
+
   const updateRoles = (newRoles) => {
     const d = diffArrays(roles, newRoles);
     setRoles(newRoles);
     d.added.forEach(r => swallow(api.createRole(r)));
-    d.removed.forEach(r => swallow(api.deleteRole(r.id)));
+    d.removed.forEach(r => handleDelete('role', r.id)());
     d.updated.forEach(r => swallow(api.updateRole(r.id, r)));
   };
   const updateTasks = (newTasks) => {
     const d = diffArrays(tasks, newTasks);
     setTasks(newTasks);
     d.added.forEach(t => swallow(api.createTask(t)));
-    d.removed.forEach(t => swallow(api.deleteTask(t.id)));
+    d.removed.forEach(t => handleDelete('task', t.id)());
     d.updated.forEach(t => swallow(api.updateTask(t.id, t)));
   };
   const updateProjects = (newP) => {
     const d = diffArrays(projects, newP);
     setProjects(newP);
     d.added.forEach(p => swallow(api.createProject(p)));
-    d.removed.forEach(p => swallow(api.deleteProject(p.id)));
+    d.removed.forEach(p => handleDelete('project', p.id)());
     d.updated.forEach(p => swallow(api.updateProject(p.id, p)));
   };
   const updateAlbumDesigns = (newA) => {
     const d = diffArrays(albumDesigns, newA);
     setAlbumDesigns(newA);
     d.added.forEach(a => swallow(api.createAlbum(a)));
-    d.removed.forEach(a => swallow(api.deleteAlbum(a.id)));
+    d.removed.forEach(a => handleDelete('album', a.id)());
     d.updated.forEach(a => swallow(api.updateAlbum(a.id, a)));
   };
 
@@ -275,6 +307,9 @@ export default function StudioWorkflowManager() {
     }
   };
   const moveToTrash = (type, item, relatedCompletions = {}) => {
+    // 在 trash 列表里乐观追加一条 _local 占位项。紧随其后的 updateXxx diff
+    // 会触发 api.deleteX,服务器返回真实 trashId 时 promoteTrash() 替换占位项的 id。
+    // 这意味着删完立刻点恢复也能用,不再需要等轮询。
     const optimistic = {
       id: `trash_local_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       type, item,
@@ -283,16 +318,14 @@ export default function StudioWorkflowManager() {
       _local: true,
     };
     setTrash([optimistic, ...trash]);
-    setTimeout(refreshTrash, 1000);
   };
 
   const restoreFromTrash = async (trashId) => {
     const trashItem = trash.find(t => t.id === trashId);
     if (!trashItem) return;
     if (trashItem._local) {
-      // 本会话刚删除的项目还没拿到真实 trash id,等刷新
-      await refreshTrash();
-      alert('正在与服务器同步,请稍后再试');
+      // 还没拿到真实 id(api.deleteX 在路上)。极短窗口,提示用户重试一次。
+      alert('正在保存到服务器,请稍后再点一次恢复');
       return;
     }
     try {
@@ -479,7 +512,12 @@ export default function StudioWorkflowManager() {
     setSplitting(false);
   };
 
-  const todayKey = new Date().toISOString().split('T')[0];
+  // 本地时区的"今天"。toISOString() 是 UTC,跨日边界会和用户感知的日期对不上。
+  // 与 lib/api.ts 里 localDateParams() 一致 — 这样 completion key 与 bootstrap 返回的 key 完全对齐。
+  const todayKey = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
   
   const allLinkedTasks = [];
   roles.forEach(r => {
@@ -630,15 +668,16 @@ export default function StudioWorkflowManager() {
                 onConfirm: () => {
                   const relatedC = {};
                   Object.keys(completions).forEach(key => {
-                    if (key.startsWith(`${t.id}_`)) relatedC[key] = completions[key];
+                    if (key.startsWith(`${t.id}|`)) relatedC[key] = completions[key];
                   });
                   moveToTrash('task', t, relatedC);
                   updateTasks(tasks.filter(x => x.id !== t.id));
+                  // 服务器 cascade 已清理 task_completions,本地只 set state(不 fire API,避免 404)
                   const cleaned = { ...completions };
                   Object.keys(cleaned).forEach(key => {
-                    if (key.startsWith(`${t.id}_`)) delete cleaned[key];
+                    if (key.startsWith(`${t.id}|`)) delete cleaned[key];
                   });
-                  updateCompletions(cleaned);
+                  setCompletions(cleaned);
                   setConfirmDialog(null);
                 }
               });
@@ -796,15 +835,16 @@ export default function StudioWorkflowManager() {
                                         onConfirm: () => {
                                           const relatedC = {};
                                           Object.keys(projectCompletions).forEach(key => {
-                                            if (key.startsWith(`${p.id}_`)) relatedC[key] = projectCompletions[key];
+                                            if (key.startsWith(`${p.id}|`)) relatedC[key] = projectCompletions[key];
                                           });
                                           moveToTrash('project', p, relatedC);
                                           updateProjects(projects.filter(x => x.id !== p.id));
+                                          // 服务器 cascade 已清理 project_completions,本地只 set state
                                           const cleanedCompletions = { ...projectCompletions };
                                           Object.keys(cleanedCompletions).forEach(key => {
-                                            if (key.startsWith(`${p.id}_`)) delete cleanedCompletions[key];
+                                            if (key.startsWith(`${p.id}|`)) delete cleanedCompletions[key];
                                           });
-                                          updateProjectCompletions(cleanedCompletions);
+                                          setProjectCompletions(cleanedCompletions);
                                           setConfirmDialog(null);
                                         }
                                       });
@@ -860,11 +900,12 @@ export default function StudioWorkflowManager() {
                                           });
                                           moveToTrash('album', album, relatedC);
                                           updateAlbumDesigns(albumDesigns.filter(x => x.id !== album.id));
+                                          // 服务器 cascade 已清理 album_completions,本地只 set state
                                           const cleaned = { ...albumCompletions };
                                           Object.keys(cleaned).forEach(key => {
                                             if (key.startsWith(`album|${album.id}|`)) delete cleaned[key];
                                           });
-                                          updateAlbumCompletions(cleaned);
+                                          setAlbumCompletions(cleaned);
                                           setConfirmDialog(null);
                                         }
                                       });
@@ -936,15 +977,16 @@ export default function StudioWorkflowManager() {
                                             onConfirm: () => {
                                               const relatedC = {};
                                               Object.keys(completions).forEach(key => {
-                                                if (key.startsWith(`${t.id}_`)) relatedC[key] = completions[key];
+                                                if (key.startsWith(`${t.id}|`)) relatedC[key] = completions[key];
                                               });
                                               moveToTrash('task', t, relatedC);
                                               updateTasks(tasks.filter(x => x.id !== t.id));
+                                              // 服务器 cascade 已清理 task_completions,本地只 set state
                                               const cleaned = { ...completions };
                                               Object.keys(cleaned).forEach(key => {
-                                                if (key.startsWith(`${t.id}_`)) delete cleaned[key];
+                                                if (key.startsWith(`${t.id}|`)) delete cleaned[key];
                                               });
-                                              updateCompletions(cleaned);
+                                              setCompletions(cleaned);
                                               setConfirmDialog(null);
                                             }
                                           });
@@ -1075,1027 +1117,6 @@ export default function StudioWorkflowManager() {
           onCancel={() => setConfirmDialog(null)}
         />
       )}
-    </div>
-  );
-}
-
-function ConfirmDialog({ title, message, danger, onConfirm, onCancel }) {
-  return (
-    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4" onClick={onCancel}>
-      <div className="bg-white rounded-2xl w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
-        <div className="flex items-start gap-3 mb-4">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${danger ? 'bg-rose-100' : 'bg-amber-100'}`}>
-            <AlertCircle className={`w-5 h-5 ${danger ? 'text-rose-600' : 'text-amber-600'}`} />
-          </div>
-          <div className="flex-1 min-w-0 pt-1">
-            <h3 className="font-semibold text-slate-900 text-base">{title}</h3>
-            {message && <p className="text-sm text-slate-600 mt-1">{message}</p>}
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={onCancel}
-            className="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            取消
-          </button>
-          <button
-            onClick={onConfirm}
-            className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-medium text-white ${danger ? 'bg-rose-600 hover:bg-rose-700' : 'bg-slate-900 hover:bg-slate-800'}`}
-          >
-            {danger ? '永久删除' : '确认删除'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RoleModal({ role, onClose, onSave }) {
-  const [name, setName] = useState(role?.name || '');
-  const [icon, setIcon] = useState(role?.icon || '👤');
-  const [duties, setDuties] = useState(role?.duties || '');
-  const [isAssistant, setIsAssistant] = useState(role?.isAssistant || false);
-  const [color, setColor] = useState(role?.color || 'bg-slate-500');
-  const colors = ['bg-blue-500', 'bg-cyan-500', 'bg-purple-500', 'bg-pink-500', 'bg-amber-500', 'bg-green-500', 'bg-rose-500', 'bg-indigo-500', 'bg-teal-500', 'bg-emerald-500', 'bg-orange-500'];
-
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">{role ? '编辑职位' : '添加职位'}</h3>
-          <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded"><X className="w-5 h-5" /></button>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="text-sm font-medium text-slate-700">职位名称</label>
-            <input value={name} onChange={e => setName(e.target.value)}
-              className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900" />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">图标(emoji)</label>
-            <input value={icon} onChange={e => setIcon(e.target.value)}
-              className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900" maxLength={2} />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">颜色</label>
-            <div className="flex gap-2 mt-1.5 flex-wrap">
-              {colors.map(c => (
-                <button key={c} onClick={() => setColor(c)}
-                  className={`w-7 h-7 rounded-lg ${c} ${color === c ? 'ring-2 ring-offset-2 ring-slate-900' : ''}`} />
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">基本职责</label>
-            <textarea value={duties} onChange={e => setDuties(e.target.value)} rows={3}
-              className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-slate-900 resize-none" />
-          </div>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={isAssistant} onChange={e => setIsAssistant(e.target.checked)} className="rounded" />
-            <span>由助理负责</span>
-          </label>
-        </div>
-        <div className="flex gap-2 mt-5">
-          <button onClick={onClose} className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">取消</button>
-          <button onClick={() => name.trim() && onSave({ name, icon, duties, isAssistant, color })}
-            disabled={!name.trim()} className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-800 disabled:opacity-50">保存</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TaskModal({ task, roles, defaultRoleId, onClose, onSave }) {
-  const [name, setName] = useState(task?.name || '');
-  const [roleId, setRoleId] = useState(task?.roleId || defaultRoleId || roles[0]?.id);
-  const [frequency, setFrequency] = useState(task?.frequency || '每日');
-  const [duration, setDuration] = useState(task?.duration || '');
-  const [description, setDescription] = useState(task?.description || '');
-
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">{task ? '编辑任务' : '添加任务'}</h3>
-          <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded"><X className="w-5 h-5" /></button>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="text-sm font-medium text-slate-700">任务名称</label>
-            <input value={name} onChange={e => setName(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">所属职位</label>
-            <select value={roleId} onChange={e => setRoleId(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm">
-              {roles.map(r => <option key={r.id} value={r.id}>{r.icon} {r.name}</option>)}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-sm font-medium text-slate-700">频率</label>
-              <select value={frequency} onChange={e => setFrequency(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm">
-                <option>每日</option><option>每周</option><option>每月</option><option>临时</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700">耗时(分钟)</label>
-              <input type="number" value={duration} onChange={e => setDuration(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-            </div>
-          </div>
-          <p className="text-xs text-slate-500">💡 项目制任务请在「拍摄项目」中管理</p>
-          <div>
-            <label className="text-sm font-medium text-slate-700">任务描述</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none" />
-          </div>
-        </div>
-        <div className="flex gap-2 mt-5">
-          <button onClick={onClose} className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">取消</button>
-          <button onClick={() => name.trim() && roleId && onSave({ name, roleId, frequency, duration, description })}
-            disabled={!name.trim() || !roleId} className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-800 disabled:opacity-50">保存</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SplitModal({ task, result, loading, onClose }) {
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-lg p-5 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2"><Sparkles className="w-5 h-5 text-amber-500" /><h3 className="text-lg font-semibold">任务拆分</h3></div>
-          <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded"><X className="w-5 h-5" /></button>
-        </div>
-        <div className="bg-slate-50 rounded-lg p-3 mb-4">
-          <div className="text-xs text-slate-500 mb-1">任务名称</div>
-          <div className="font-medium text-slate-900">{task.name}</div>
-        </div>
-        {loading && (
-          <div className="py-12 text-center">
-            <Loader2 className="w-8 h-8 animate-spin text-slate-400 mx-auto mb-2" />
-            <p className="text-sm text-slate-500">AI正在分析并拆分任务...</p>
-          </div>
-        )}
-        {!loading && result?.error && (
-          <div className="py-8 text-center">
-            <AlertCircle className="w-8 h-8 text-rose-400 mx-auto mb-2" />
-            <p className="text-sm text-slate-600">{result.error}</p>
-          </div>
-        )}
-        {!loading && result?.steps && (
-          <div>
-            <div className="flex items-center gap-3 mb-3 text-sm">
-              <div className="flex items-center gap-1.5 text-slate-600">
-                <Clock className="w-4 h-4" /><span>预计总耗时:<strong className="text-slate-900">{result.totalTime}分钟</strong></span>
-              </div>
-            </div>
-            <div className="space-y-2 mb-4">
-              {result.steps.map((step, idx) => (
-                <div key={idx} className="border border-slate-200 rounded-lg p-3">
-                  <div className="flex items-start gap-3">
-                    <div className="w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-semibold flex items-center justify-center shrink-0 mt-0.5">{idx + 1}</div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="font-medium text-slate-900 text-sm">{step.name}</div>
-                        <div className="text-xs text-slate-500 flex items-center gap-1"><Clock className="w-3 h-3" />{step.duration}分钟</div>
-                      </div>
-                      {step.note && <div className="text-xs text-slate-600 mt-1">💡 {step.note}</div>}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {result.tips && (
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                <div className="text-xs font-medium text-amber-900 mb-1">执行建议</div>
-                <div className="text-sm text-amber-800">{result.tips}</div>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TodayView({ todayTasks, roles, completions, todayKey, updateCompletions, splitTask, projectTasks, projectCompletions, updateProjectCompletions, albumCompletions, updateAlbumCompletions }) {
-  const today = new Date().toISOString().split('T')[0];
-  const overdueTasks = projectTasks.filter(t => t.dueDate < today);
-  const todayDueTasks = projectTasks.filter(t => t.dueDate === today);
-
-  const toggleProjectOrAlbum = (t) => {
-    if (t.isAlbum) updateAlbumCompletions({ ...albumCompletions, [t.completionKey]: !albumCompletions[t.completionKey] });
-    else updateProjectCompletions({ ...projectCompletions, [t.completionKey]: !projectCompletions[t.completionKey] });
-  };
-
-  const isTaskCompleted = (t) => t.isAlbum ? albumCompletions[t.completionKey] : projectCompletions[t.completionKey];
-
-  // 时间段定义 - 按职位分配
-  const TIME_SLOTS = [
-    { 
-      id: 'morning', 
-      label: '早上 8:00 - 9:00', 
-      icon: '🌅',
-      desc: '邮件 & 客服回复',
-      bgColor: 'bg-orange-50',
-      borderColor: 'border-orange-200',
-      iconBg: 'bg-orange-100',
-      roleIds: ['r6'], // 客服
-    },
-    { 
-      id: 'late_morning', 
-      label: '上午 10:00 - 12:00', 
-      icon: '☕',
-      desc: '修图工作',
-      bgColor: 'bg-purple-50',
-      borderColor: 'border-purple-200',
-      iconBg: 'bg-purple-100',
-      roleIds: ['r3'], // 修图师
-    },
-    { 
-      id: 'afternoon', 
-      label: '下午 12:00 - 14:00', 
-      icon: '🌞',
-      desc: '广告设计 & 相册设计',
-      bgColor: 'bg-amber-50',
-      borderColor: 'border-amber-200',
-      iconBg: 'bg-amber-100',
-      roleIds: ['r4', 'r5'], // 广告设计 + 相册设计
-    },
-    { 
-      id: 'late_afternoon', 
-      label: '下午 15:00 - 16:00', 
-      icon: '🍵',
-      desc: 'Marketing 运营对接(与助理)',
-      bgColor: 'bg-rose-50',
-      borderColor: 'border-rose-200',
-      iconBg: 'bg-rose-100',
-      roleIds: ['r7'], // Marketing运营
-    },
-  ];
-
-  // 把日常任务按时间段分组
-  const otherDailyTasks = []; // 不属于上述时间段的任务
-  const slotDailyTasks = {}; // { slotId: [tasks] }
-  TIME_SLOTS.forEach(slot => slotDailyTasks[slot.id] = []);
-  
-  todayTasks.forEach(task => {
-    const slot = TIME_SLOTS.find(s => s.roleIds.includes(task.roleId));
-    if (slot) {
-      slotDailyTasks[slot.id].push(task);
-    } else {
-      otherDailyTasks.push(task);
-    }
-  });
-
-  // 把项目任务按时间段分组
-  const slotProjectTasks = {};
-  const otherProjectTasks = [];
-  TIME_SLOTS.forEach(slot => slotProjectTasks[slot.id] = []);
-  
-  todayDueTasks.forEach(task => {
-    const slot = TIME_SLOTS.find(s => s.roleIds.includes(task.roleId));
-    if (slot) {
-      slotProjectTasks[slot.id].push(task);
-    } else {
-      otherProjectTasks.push(task);
-    }
-  });
-
-  // 渲染单条日常任务
-  const renderDailyTask = (task) => {
-    const role = roles.find(r => r.id === task.roleId);
-    const isLinked = task.frequency === '项目联动';
-    const completionKey = isLinked ? task.completionKey : `${task.id}|${todayKey}`;
-    const isCompleted = completions[completionKey];
-    return (
-      <div key={task.id} className={`bg-white rounded-xl border p-3 flex items-center gap-3 transition ${
-        isCompleted ? 'border-emerald-200 bg-emerald-50/30' : isLinked ? 'border-rose-200' : 'border-slate-200'
-      }`}>
-        <button onClick={() => updateCompletions({ ...completions, [completionKey]: !isCompleted })}
-          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 hover:border-slate-500'}`}>
-          {isCompleted && <Check className="w-3 h-3 text-white" />}
-        </button>
-        <div className={`w-7 h-7 rounded-lg ${role?.color || 'bg-slate-400'} flex items-center justify-center text-sm shrink-0`}>{role?.icon}</div>
-        <div className="flex-1 min-w-0">
-          <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 line-through' : 'text-slate-900'} truncate`}>{task.name}</div>
-          <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
-            <span>{role?.name}</span>
-            {isLinked ? <span className="px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded font-medium text-xs">🔗 项目联动</span> : <span>· {task.frequency}</span>}
-            {task.duration && <span>· {task.duration}分钟</span>}
-          </div>
-        </div>
-        <button onClick={() => splitTask(task)} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="AI拆分">
-          <Sparkles className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    );
-  };
-
-  // 渲染单条项目任务
-  const renderProjectTask = (t) => (
-    <ProjectTaskCard key={t.completionKey} task={t} roles={roles}
-      isCompleted={isTaskCompleted(t)} onToggle={() => toggleProjectOrAlbum(t)} onSplit={splitTask} />
-  );
-
-  const totalSlotTasks = TIME_SLOTS.reduce((sum, s) => sum + slotDailyTasks[s.id].length + slotProjectTasks[s.id].length, 0);
-  const hasAnyTasks = todayTasks.length > 0 || projectTasks.length > 0;
-
-  return (
-    <div>
-      <div className="mb-5">
-        <h2 className="text-lg font-semibold text-slate-900">今日待办</h2>
-        <p className="text-sm text-slate-500 mt-0.5">{new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</p>
-      </div>
-
-      {/* 逾期任务 - 始终显示在最顶部 */}
-      {overdueTasks.length > 0 && (
-        <div className="mb-5">
-          <div className="flex items-center gap-2 mb-2.5">
-            <AlertCircle className="w-4 h-4 text-rose-500" />
-            <h3 className="text-sm font-semibold text-rose-600">⚠️ 逾期任务 ({overdueTasks.length})</h3>
-          </div>
-          <div className="space-y-2">
-            {overdueTasks.map(t => (
-              <ProjectTaskCard key={t.completionKey} task={t} roles={roles} isOverdue
-                isCompleted={isTaskCompleted(t)} onToggle={() => toggleProjectOrAlbum(t)} onSplit={splitTask} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 时间段安排 */}
-      <div className="mb-5">
-        <div className="flex items-center gap-2 mb-3">
-          <Clock className="w-4 h-4 text-slate-600" />
-          <h3 className="text-sm font-semibold text-slate-800">今日工作时间表</h3>
-        </div>
-        <div className="space-y-3">
-          {TIME_SLOTS.map(slot => {
-            const dailyInSlot = slotDailyTasks[slot.id] || [];
-            const projectsInSlot = slotProjectTasks[slot.id] || [];
-            const totalInSlot = dailyInSlot.length + projectsInSlot.length;
-            const completedInSlot = 
-              dailyInSlot.filter(t => completions[t.frequency === '项目联动' ? t.completionKey : `${t.id}|${todayKey}`]).length +
-              projectsInSlot.filter(t => isTaskCompleted(t)).length;
-            
-            return (
-              <div key={slot.id} className={`rounded-xl border-2 ${slot.borderColor} ${slot.bgColor} overflow-hidden`}>
-                <div className="px-4 py-3 flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-lg ${slot.iconBg} flex items-center justify-center text-xl shrink-0`}>
-                    {slot.icon}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="font-semibold text-slate-900 text-sm">{slot.label}</h4>
-                      {totalInSlot > 0 && (
-                        <span className="text-xs px-2 py-0.5 bg-white/80 text-slate-700 rounded-full font-medium">
-                          {completedInSlot}/{totalInSlot}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-600 mt-0.5">{slot.desc}</p>
-                  </div>
-                </div>
-                <div className="px-3 pb-3">
-                  {totalInSlot === 0 ? (
-                    <div className="bg-white/60 rounded-lg p-3 text-center">
-                      <p className="text-xs text-slate-500">此时段暂无待办</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {projectsInSlot.map(t => renderProjectTask(t))}
-                      {dailyInSlot.map(t => renderDailyTask(t))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 其他时间任务(不属于固定时间段的) */}
-      {(otherDailyTasks.length > 0 || otherProjectTasks.length > 0) && (
-        <div className="mb-5">
-          <div className="flex items-center gap-2 mb-2.5">
-            <ListTodo className="w-4 h-4 text-slate-500" />
-            <h3 className="text-sm font-semibold text-slate-700">📋 灵活时间任务({otherDailyTasks.length + otherProjectTasks.length})</h3>
-            <span className="text-xs text-slate-400">— 可在空闲时间完成</span>
-          </div>
-          <div className="space-y-2">
-            {otherProjectTasks.map(t => renderProjectTask(t))}
-            {otherDailyTasks.map(t => renderDailyTask(t))}
-          </div>
-        </div>
-      )}
-
-      {!hasAnyTasks && (
-        <div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center">
-          <CheckCircle2 className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500">今日没有待办任务</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function WeeklyView({ tasks, roles, completions, todayKey, updateCompletions, splitTask, onEdit, onDelete }) {
-  // 筛选标记为本周的任务
-  const weeklyTasks = tasks.filter(t => t.isWeekly);
-  
-  // 按职位分组
-  const tasksByRole = {};
-  weeklyTasks.forEach(t => {
-    if (!tasksByRole[t.roleId]) tasksByRole[t.roleId] = [];
-    tasksByRole[t.roleId].push(t);
-  });
-  
-  // 按截止日期排序每组内的任务
-  Object.keys(tasksByRole).forEach(roleId => {
-    tasksByRole[roleId].sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
-  });
-  
-  // 进度统计
-  const completedCount = weeklyTasks.filter(t => completions[`${t.id}|${todayKey}`]).length;
-  const totalCount = weeklyTasks.length;
-  const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-  
-  // 按截止日期分类:逾期 / 今日 / 本周内 / 之后
-  const today = new Date(todayKey);
-  const overdueTasks = weeklyTasks.filter(t => t.dueDate && new Date(t.dueDate) < today && !completions[`${t.id}|${todayKey}`]);
-  
-  const formatDueDate = (dateStr) => {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    const diff = Math.ceil((date - today) / (1000 * 60 * 60 * 24));
-    if (diff === 0) return '今天截止';
-    if (diff === 1) return '明天截止';
-    if (diff < 0) return `逾期${Math.abs(diff)}天`;
-    if (diff <= 7) return `还有${diff}天`;
-    const month = date.getMonth() + 1;
-    const day = date.getDate();
-    return `${month}月${day}日截止`;
-  };
-  
-  const getDueDateColor = (dateStr, isCompleted) => {
-    if (isCompleted) return 'text-emerald-600';
-    if (!dateStr) return 'text-slate-500';
-    const date = new Date(dateStr);
-    const diff = Math.ceil((date - today) / (1000 * 60 * 60 * 24));
-    if (diff < 0) return 'text-rose-600 font-semibold';
-    if (diff === 0) return 'text-rose-600 font-semibold';
-    if (diff === 1) return 'text-amber-600 font-medium';
-    if (diff <= 3) return 'text-amber-600';
-    return 'text-slate-500';
-  };
-  
-  const getPriorityFromDescription = (description) => {
-    if (!description) return null;
-    if (description.includes('优先级:高')) return { label: '高', color: 'bg-rose-100 text-rose-700' };
-    if (description.includes('优先级:中')) return { label: '中', color: 'bg-amber-100 text-amber-700' };
-    if (description.includes('优先级:低')) return { label: '低', color: 'bg-slate-100 text-slate-600' };
-    return null;
-  };
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900">本周待办</h2>
-          <p className="text-sm text-slate-500 mt-0.5">按职位分类的本周重点任务 · 共 {totalCount} 项 · 已完成 {completedCount} 项</p>
-        </div>
-      </div>
-
-      {/* 整体进度条 */}
-      {totalCount > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4 mb-5">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-slate-700">本周整体进度</span>
-            <span className="text-sm font-semibold text-slate-900">{progressPct}%</span>
-          </div>
-          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${progressPct}%` }} />
-          </div>
-          <div className="flex items-center gap-4 mt-3 text-xs text-slate-600">
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>已完成 {completedCount}</span>
-            </div>
-            {overdueTasks.length > 0 && (
-              <div className="flex items-center gap-1">
-                <div className="w-2 h-2 rounded-full bg-rose-500" />
-                <span className="text-rose-600 font-medium">逾期 {overdueTasks.length}</span>
-              </div>
-            )}
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-slate-300" />
-              <span>待办 {totalCount - completedCount - overdueTasks.length}</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {totalCount === 0 ? (
-        <div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center">
-          <CalendarDays className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500">本周暂无安排</p>
-          <p className="text-sm text-slate-400 mt-1">需要添加本周任务,可以在 Claude 对话里告诉我</p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {Object.keys(tasksByRole).map(roleId => {
-            const role = roles.find(r => r.id === roleId);
-            if (!role) return null;
-            const roleTasks = tasksByRole[roleId];
-            const roleCompleted = roleTasks.filter(t => completions[`${t.id}|${todayKey}`]).length;
-            
-            return (
-              <div key={roleId} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
-                  <div className={`w-8 h-8 rounded-lg ${role.color} flex items-center justify-center text-base shrink-0`}>
-                    {role.icon}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-semibold text-slate-900 text-sm">{role.name}</h3>
-                      {role.isAssistant && <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">助理</span>}
-                    </div>
-                    <p className="text-xs text-slate-500 mt-0.5">{roleCompleted}/{roleTasks.length} 已完成</p>
-                  </div>
-                  <div className="text-xs text-slate-400">
-                    {Math.round((roleCompleted / roleTasks.length) * 100)}%
-                  </div>
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {roleTasks.map(t => {
-                    const completionKey = `${t.id}|${todayKey}`;
-                    const isCompleted = completions[completionKey];
-                    const priority = getPriorityFromDescription(t.description);
-                    
-                    return (
-                      <div key={t.id} className={`p-3 flex items-start gap-3 transition ${isCompleted ? 'bg-emerald-50/40' : ''}`}>
-                        <button
-                          onClick={() => updateCompletions({ ...completions, [completionKey]: !isCompleted })}
-                          className={`w-5 h-5 mt-0.5 rounded-full border-2 flex items-center justify-center shrink-0 transition ${
-                            isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 hover:border-slate-500'
-                          }`}
-                        >
-                          {isCompleted && <Check className="w-3 h-3 text-white" />}
-                        </button>
-                        <div className="flex-1 min-w-0">
-                          <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 line-through' : 'text-slate-900'}`}>
-                            {t.name}
-                          </div>
-                          <div className="flex items-center gap-2 mt-1.5 flex-wrap text-xs">
-                            {priority && (
-                              <span className={`px-1.5 py-0.5 rounded font-medium ${priority.color}`}>
-                                优先级 {priority.label}
-                              </span>
-                            )}
-                            <span className={getDueDateColor(t.dueDate, isCompleted)}>
-                              📅 {formatDueDate(t.dueDate)}
-                            </span>
-                            {t.duration && <span className="text-slate-500">⏱ {t.duration}分钟</span>}
-                          </div>
-                          {t.description && (
-                            <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">{t.description}</p>
-                          )}
-                        </div>
-                        <div className="flex gap-1 shrink-0">
-                          <button onClick={() => splitTask(t)} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="AI拆分">
-                            <Sparkles className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => onEdit(t)} className="p-1.5 hover:bg-slate-100 rounded text-slate-500" title="编辑">
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => onDelete(t)} className="p-1.5 hover:bg-rose-50 rounded text-rose-500" title="删除">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TrashView({ trash, roles, onRestore, onPermanentDelete, onEmptyTrash, setConfirmDialog }) {
-  const formatTime = (timestamp) => {
-    const diff = Date.now() - timestamp;
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor(diff / (1000 * 60));
-    if (days > 0) return `${days}天前删除`;
-    if (hours > 0) return `${hours}小时前删除`;
-    if (minutes > 0) return `${minutes}分钟前删除`;
-    return '刚刚删除';
-  };
-
-  const getDaysUntilExpiry = (timestamp) => {
-    const expiryTime = timestamp + 30 * 24 * 60 * 60 * 1000;
-    return Math.ceil((expiryTime - Date.now()) / (1000 * 60 * 60 * 24));
-  };
-
-  const getItemDescription = (trashItem) => {
-    if (!trashItem || !trashItem.item) {
-      return { icon: '?', title: '损坏的数据', subtitle: '该回收项数据异常,建议永久删除', color: 'bg-slate-100 text-slate-700' };
-    }
-    if (trashItem.type === 'task') {
-      const role = (roles || []).find(r => r.id === trashItem.item.roleId);
-      return { icon: '📝', title: trashItem.item.name || '未命名任务', subtitle: `日常任务 · ${role?.name || '未知职位'} · ${trashItem.item.frequency || ''}`, color: 'bg-slate-100 text-slate-700' };
-    }
-    if (trashItem.type === 'project') {
-      return { icon: '📸', title: `${trashItem.item.clientName || '未命名'} - ${trashItem.item.shootType || ''}`, subtitle: `拍摄项目 · ${trashItem.item.shootDate || ''}${trashItem.item.location ? ` · ${trashItem.item.location}` : ''}`, color: 'bg-blue-100 text-blue-700' };
-    }
-    if (trashItem.type === 'album') {
-      return { icon: '📔', title: trashItem.item.clientName || '未命名', subtitle: `相册设计 · ${trashItem.item.albumType || '相册'} · 开始 ${trashItem.item.startDate || ''}`, color: 'bg-amber-100 text-amber-700' };
-    }
-    if (trashItem.type === 'role') {
-      const role = trashItem.item.role || {};
-      return { icon: role.icon || '👤', title: role.name || '未知职位', subtitle: `职位 · 含 ${trashItem.item.tasks?.length || 0} 个相关任务`, color: 'bg-purple-100 text-purple-700' };
-    }
-    return { icon: '?', title: '未知项目', subtitle: '', color: 'bg-slate-100 text-slate-700' };
-  };
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-5">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-900 flex items-center gap-2">
-            <Archive className="w-5 h-5 text-slate-600" />回收站
-          </h2>
-          <p className="text-sm text-slate-500 mt-0.5">删除的项目会保留30天,之后自动永久清除</p>
-        </div>
-        {trash.length > 0 && (
-          <button onClick={() => {
-            setConfirmDialog({
-              title: `清空回收站?`,
-              message: `这将永久删除全部 ${trash.length} 个项目,无法恢复。`,
-              onConfirm: () => { onEmptyTrash(); setConfirmDialog(null); },
-              danger: true,
-            });
-          }} className="text-sm text-rose-600 hover:bg-rose-50 px-3 py-2 rounded-lg flex items-center gap-1.5">
-            <Trash2 className="w-4 h-4" />清空回收站
-          </button>
-        )}
-      </div>
-
-      {trash.length === 0 ? (
-        <div className="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center">
-          <Archive className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500">回收站是空的</p>
-          <p className="text-sm text-slate-400 mt-1">删除的任务、项目和相册会出现在这里</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {[...trash].sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0)).map(trashItem => {
-            const desc = getItemDescription(trashItem);
-            const daysLeft = getDaysUntilExpiry(trashItem.deletedAt || Date.now());
-            return (
-              <div key={trashItem.id} className="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-3">
-                <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-lg shrink-0">{desc.icon}</div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-semibold text-slate-900">{desc.title}</h3>
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${desc.color}`}>
-                      {trashItem.type === 'task' ? '任务' : trashItem.type === 'project' ? '拍摄项目' : trashItem.type === 'album' ? '相册' : '职位'}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5 truncate">{desc.subtitle}</p>
-                  <div className="text-xs text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
-                    <span>{formatTime(trashItem.deletedAt || Date.now())}</span>
-                    <span>·</span>
-                    <span className={daysLeft <= 7 ? 'text-amber-600 font-medium' : ''}>{daysLeft <= 0 ? '即将清除' : `${daysLeft}天后自动清除`}</span>
-                  </div>
-                </div>
-                <button onClick={() => onRestore(trashItem.id)}
-                  className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg text-sm font-medium flex items-center gap-1 shrink-0">
-                  <Check className="w-3.5 h-3.5" />恢复
-                </button>
-                <button onClick={() => {
-                  setConfirmDialog({
-                    title: `永久删除"${desc.title}"?`,
-                    message: `此操作无法撤销,该项目将被彻底清除。`,
-                    onConfirm: () => { onPermanentDelete(trashItem.id); setConfirmDialog(null); },
-                    danger: true,
-                  });
-                }} className="p-2 hover:bg-rose-50 rounded-lg text-rose-500 shrink-0">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProjectTaskCard({ task, roles, isOverdue, isCompleted, onToggle, onSplit }) {
-  const role = roles.find(r => r.id === task.roleId);
-  const today = new Date().toISOString().split('T')[0];
-  const daysOverdue = isOverdue ? Math.floor((new Date(today) - new Date(task.dueDate)) / 86400000) : 0;
-  const isAlbum = task.isAlbum;
-  
-  let timingLabel = '';
-  if (isAlbum) {
-    timingLabel = task.daysAfterStart === 0 ? '设计开始日' : `开始后${task.daysAfterStart}天`;
-  } else {
-    if (task.daysBeforeShoot > 0) timingLabel = `拍摄前${task.daysBeforeShoot}天`;
-    else if (task.daysBeforeShoot === 0) timingLabel = '拍摄当天';
-    else timingLabel = `拍摄后${Math.abs(task.daysBeforeShoot)}天`;
-  }
-  const contextLabel = isAlbum ? `📔 ${task.album.clientName} 相册设计` : `📸 ${task.project.clientName} · ${task.project.shootType}`;
-  const dateLabel = isAlbum ? `开始日 ${task.album.startDate}` : `拍摄日 ${task.project.shootDate}`;
-
-  return (
-    <div className={`bg-white rounded-xl border p-4 transition ${
-      isCompleted ? 'border-emerald-200 bg-emerald-50/30' :
-      isOverdue ? 'border-rose-200 bg-rose-50/30' :
-      isAlbum ? 'border-amber-200 bg-amber-50/20' : 'border-blue-200 bg-blue-50/20'
-    }`}>
-      <div className="flex items-center gap-3">
-        <button onClick={onToggle} className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
-          {isCompleted && <Check className="w-3.5 h-3.5 text-white" />}
-        </button>
-        <div className={`w-8 h-8 rounded-lg ${role?.color || 'bg-slate-400'} flex items-center justify-center text-sm shrink-0`}>{role?.icon}</div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className={`font-medium text-sm ${isCompleted ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{task.name}</div>
-            {isOverdue && !isCompleted && <span className="text-xs px-1.5 py-0.5 bg-rose-500 text-white rounded font-medium">逾期{daysOverdue}天</span>}
-          </div>
-          <div className="text-xs text-slate-600 mt-1 flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-slate-700">{contextLabel}</span><span>·</span><span>{timingLabel}</span><span>·</span><span>{dateLabel}</span>
-          </div>
-        </div>
-        <button onClick={() => onSplit({ ...task, name: task.name + ` (${isAlbum ? task.album.clientName : task.project.clientName})` })}
-          className="p-2 hover:bg-white rounded-lg text-slate-600">
-          <Sparkles className="w-4 h-4" />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ProjectCard({ project, tasks, completions, updateCompletions, expanded, onToggle, onEdit, onDelete, isPast, onSplit }) {
-  const completedCount = tasks.filter(t => completions[t.completionKey]).length;
-  const today = new Date().toISOString().split('T')[0];
-  const shootDate = new Date(project.shootDate + 'T00:00:00');
-  const daysUntil = Math.ceil((shootDate - new Date(today + 'T00:00:00')) / 86400000);
-  
-  let urgencyLabel = '', urgencyColor = 'bg-slate-100 text-slate-600';
-  if (daysUntil < 0) { urgencyLabel = '已结束'; urgencyColor = 'bg-slate-100 text-slate-500'; }
-  else if (daysUntil === 0) { urgencyLabel = '今天拍摄'; urgencyColor = 'bg-rose-100 text-rose-700'; }
-  else if (daysUntil === 1) { urgencyLabel = '明天拍摄'; urgencyColor = 'bg-amber-100 text-amber-700'; }
-  else if (daysUntil <= 3) { urgencyLabel = `还有${daysUntil}天`; urgencyColor = 'bg-amber-100 text-amber-700'; }
-  else if (daysUntil <= 7) { urgencyLabel = `还有${daysUntil}天`; urgencyColor = 'bg-blue-100 text-blue-700'; }
-  else { urgencyLabel = `还有${daysUntil}天`; }
-
-  return (
-    <div className={`bg-white rounded-xl border overflow-hidden transition ${isPast ? 'border-slate-200 opacity-75' : 'border-slate-200 hover:shadow-md'}`}>
-      <div className="p-4 cursor-pointer" onClick={onToggle}>
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center text-white shrink-0">
-            <Camera className="w-5 h-5" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <h3 className="font-semibold text-slate-900">{project.clientName}</h3>
-              <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded">{project.shootType}</span>
-              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${urgencyColor}`}>{urgencyLabel}</span>
-            </div>
-            <div className="text-xs text-slate-500 flex items-center gap-3 flex-wrap">
-              <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />{project.shootDate}</span>
-              {project.location && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{project.location}</span>}
-              <span>· {completedCount}/{tasks.length} 任务完成</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500" title="编辑"><Edit2 className="w-4 h-4" /></button>
-            <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-2 hover:bg-rose-50 rounded-lg text-rose-500" title="删除"><Trash2 className="w-4 h-4" /></button>
-            {expanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-          </div>
-        </div>
-        <div className="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-          <div className="h-full bg-emerald-500 transition-all" style={{ width: `${(completedCount/tasks.length)*100}%` }} />
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="border-t border-slate-100 bg-slate-50 p-4">
-          <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-3">任务时间表</div>
-          {project.notes && <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3 text-sm text-amber-900">💡 {project.notes}</div>}
-          <div className="space-y-2">
-            {tasks.map(t => {
-              const isCompleted = completions[t.completionKey];
-              const isOverdue = !isCompleted && t.dueDate < today;
-              const isToday = t.dueDate === today;
-              let timingLabel = '';
-              if (t.daysBeforeShoot > 0) timingLabel = `拍摄前${t.daysBeforeShoot}天`;
-              else if (t.daysBeforeShoot === 0) timingLabel = '拍摄当天';
-              else timingLabel = `拍摄后${Math.abs(t.daysBeforeShoot)}天`;
-              return (
-                <div key={t.id} className={`bg-white rounded-lg p-2.5 flex items-center gap-2.5 ${isOverdue ? 'border border-rose-200' : isToday ? 'border border-blue-200' : ''}`}>
-                  <button onClick={(e) => { e.stopPropagation(); updateCompletions({ ...completions, [t.completionKey]: !isCompleted }); }}
-                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
-                    {isCompleted && <Check className="w-3 h-3 text-white" />}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{t.name}</div>
-                    <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
-                      <span>{timingLabel}</span><span>·</span><span>{t.dueDate}</span>
-                      {isOverdue && <span className="text-rose-600 font-medium">· 逾期</span>}
-                      {isToday && !isCompleted && <span className="text-blue-600 font-medium">· 今日</span>}
-                    </div>
-                  </div>
-                  {onSplit && (
-                    <button onClick={(e) => { e.stopPropagation(); onSplit({ ...t, name: `${t.name} - ${project.clientName}${project.shootType}` }); }}
-                      className="p-1.5 hover:bg-slate-100 rounded text-slate-600"><Sparkles className="w-3.5 h-3.5" /></button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProjectModal({ project, defaultRoleId, onClose, onSave }) {
-  const [clientName, setClientName] = useState(project?.clientName || '');
-  const [shootType, setShootType] = useState(project?.shootType || SHOOT_TYPES[0]);
-  const [shootDate, setShootDate] = useState(project?.shootDate || '');
-  const [location, setLocation] = useState(project?.location || '');
-  const [notes, setNotes] = useState(project?.notes || '');
-  const roleId = project?.roleId || defaultRoleId || 'r1';
-
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">{project ? '编辑拍摄项目' : '新增拍摄项目'}</h3>
-          <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded"><X className="w-5 h-5" /></button>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="text-sm font-medium text-slate-700">客户姓名</label>
-            <input value={clientName} onChange={e => setClientName(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" placeholder="如:王女士" />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">拍摄类型</label>
-            <select value={shootType} onChange={e => setShootType(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm">
-              {SHOOT_TYPES.map(t => <option key={t}>{t}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">拍摄日期</label>
-            <input type="date" value={shootDate} onChange={e => setShootDate(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">拍摄地点</label>
-            <input value={location} onChange={e => setLocation(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">备注</label>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none" />
-          </div>
-        </div>
-        <div className="flex gap-2 mt-5">
-          <button onClick={onClose} className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">取消</button>
-          <button onClick={() => clientName.trim() && shootDate && onSave({ clientName, shootType, shootDate, location, notes, roleId })}
-            disabled={!clientName.trim() || !shootDate} className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-800 disabled:opacity-50">保存</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AlbumCard({ album, tasks, completions, updateCompletions, expanded, onToggle, onEdit, onDelete, onSplit }) {
-  const completedCount = tasks.filter(t => completions[t.completionKey]).length;
-  const today = new Date().toISOString().split('T')[0];
-  const startDate = new Date(album.startDate + 'T00:00:00');
-  const daysSinceStart = Math.floor((new Date(today + 'T00:00:00') - startDate) / 86400000);
-  
-  let statusLabel = '', statusColor = 'bg-slate-100 text-slate-600';
-  if (completedCount === tasks.length) { statusLabel = '✓ 全部完成'; statusColor = 'bg-emerald-100 text-emerald-700'; }
-  else if (daysSinceStart < 0) { statusLabel = `${Math.abs(daysSinceStart)}天后开始`; statusColor = 'bg-blue-100 text-blue-700'; }
-  else { statusLabel = `进行中(第${daysSinceStart + 1}天)`; statusColor = 'bg-amber-100 text-amber-700'; }
-
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-md transition">
-      <div className="p-4 cursor-pointer" onClick={onToggle}>
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center text-white shrink-0">
-            <Briefcase className="w-5 h-5" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
-              <h3 className="font-semibold text-slate-900">{album.clientName}</h3>
-              {album.albumType && <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded">{album.albumType}</span>}
-              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${statusColor}`}>{statusLabel}</span>
-            </div>
-            <div className="text-xs text-slate-500 flex items-center gap-3 flex-wrap">
-              <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />开始 {album.startDate}</span>
-              <span>· {completedCount}/{tasks.length} 任务完成</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><Edit2 className="w-4 h-4" /></button>
-            <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="p-2 hover:bg-rose-50 rounded-lg text-rose-500"><Trash2 className="w-4 h-4" /></button>
-            {expanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-          </div>
-        </div>
-        <div className="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-          <div className="h-full bg-amber-500 transition-all" style={{ width: `${(completedCount/tasks.length)*100}%` }} />
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="border-t border-slate-100 bg-slate-50 p-4">
-          <div className="text-xs font-medium text-slate-500 uppercase tracking-wide mb-3">设计任务时间表</div>
-          {album.notes && <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mb-3 text-sm text-amber-900">💡 {album.notes}</div>}
-          <div className="space-y-2">
-            {tasks.map(t => {
-              const isCompleted = completions[t.completionKey];
-              const isOverdue = !isCompleted && t.dueDate < today;
-              const isToday = t.dueDate === today;
-              const timingLabel = t.daysAfterStart === 0 ? '设计开始日' : `开始后${t.daysAfterStart}天`;
-              return (
-                <div key={t.id} className={`bg-white rounded-lg p-2.5 flex items-center gap-2.5 ${isOverdue ? 'border border-rose-200' : isToday ? 'border border-blue-200' : ''}`}>
-                  <button onClick={(e) => { e.stopPropagation(); updateCompletions({ ...completions, [t.completionKey]: !isCompleted }); }}
-                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
-                    {isCompleted && <Check className="w-3 h-3 text-white" />}
-                  </button>
-                  <div className="flex-1 min-w-0">
-                    <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{t.name}</div>
-                    <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
-                      <span>{timingLabel}</span><span>·</span><span>{t.dueDate}</span>
-                      {isOverdue && <span className="text-rose-600 font-medium">· 逾期</span>}
-                      {isToday && !isCompleted && <span className="text-blue-600 font-medium">· 今日</span>}
-                    </div>
-                  </div>
-                  {onSplit && (
-                    <button onClick={(e) => { e.stopPropagation(); onSplit({ ...t, name: `${t.name} - ${album.clientName}` }); }}
-                      className="p-1.5 hover:bg-slate-100 rounded text-slate-600"><Sparkles className="w-3.5 h-3.5" /></button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AlbumModal({ album, onClose, onSave }) {
-  const [clientName, setClientName] = useState(album?.clientName || '');
-  const [albumType, setAlbumType] = useState(album?.albumType || '婚礼相册');
-  const [startDate, setStartDate] = useState(album?.startDate || new Date().toISOString().split('T')[0]);
-  const [notes, setNotes] = useState(album?.notes || '');
-
-  return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold">{album ? '编辑相册设计' : '新增相册设计'}</h3>
-          <button onClick={onClose} className="p-1 hover:bg-slate-100 rounded"><X className="w-5 h-5" /></button>
-        </div>
-        <div className="space-y-3">
-          <div>
-            <label className="text-sm font-medium text-slate-700">客户姓名</label>
-            <input value={clientName} onChange={e => setClientName(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">相册类型</label>
-            <select value={albumType} onChange={e => setAlbumType(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm">
-              <option>婚礼相册</option><option>婚纱相册</option><option>儿童相册</option><option>家庭相册</option><option>个人写真相册</option><option>其他</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">设计开始日期</label>
-            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" />
-          </div>
-          <div>
-            <label className="text-sm font-medium text-slate-700">备注</label>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none" />
-          </div>
-        </div>
-        <div className="flex gap-2 mt-5">
-          <button onClick={onClose} className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">取消</button>
-          <button onClick={() => clientName.trim() && startDate && onSave({ clientName, albumType, startDate, notes })}
-            disabled={!clientName.trim() || !startDate} className="flex-1 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700 disabled:opacity-50">保存</button>
-        </div>
-      </div>
     </div>
   );
 }

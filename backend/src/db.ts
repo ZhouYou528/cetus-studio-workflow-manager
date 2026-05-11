@@ -70,18 +70,20 @@ export function genId(prefix: string): string {
 }
 
 // ── 回收站 ────────────────────────────────────────────────
-// 30 天恢复期。所有 DELETE 走这个,不直接物理删。
+// 30 天恢复期。所有 DELETE 走这个,不直接物理删。返回生成的 trash id,
+// route handler 把它带回给客户端,前端不再轮询 listTrash 拿真实 id。
 export async function moveToTrash(
   c: AppContext,
   type: 'task' | 'project' | 'album' | 'role',
   item: unknown,
   related: unknown,
-): Promise<void> {
+): Promise<string> {
+  const trashId = genId('trash');
   await c.env.DB
     .prepare(`INSERT INTO trash (id, type, item_data, related_data, deleted_at, deleted_by)
               VALUES (?, ?, ?, ?, ?, ?)`)
     .bind(
-      genId('trash'),
+      trashId,
       type,
       JSON.stringify(item),
       related ? JSON.stringify(related) : null,
@@ -89,6 +91,7 @@ export async function moveToTrash(
       c.var.user.email,
     )
     .run();
+  return trashId;
 }
 
 // ── 通用查询助手 ─────────────────────────────────────────

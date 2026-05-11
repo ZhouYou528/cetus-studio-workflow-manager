@@ -68,13 +68,13 @@ app.delete('/:id', async (c) => {
   if (!album) return c.json({ error: 'not_found' }, 404);
 
   const compls = await all(c, `SELECT * FROM album_completions WHERE album_id = ?`, id);
-  await moveToTrash(c, 'album', album, { album_completions: compls });
+  const trashId = await moveToTrash(c, 'album', album, { album_completions: compls });
 
   await c.env.DB.batch([
     c.env.DB.prepare(`DELETE FROM album_completions WHERE album_id = ?`).bind(id),
     c.env.DB.prepare(`DELETE FROM album_designs WHERE id = ?`).bind(id),
   ]);
-  return c.json({ ok: true });
+  return c.json({ ok: true, trashId });
 });
 
 // ── 相册子任务 ─────────────────────────────────────────
