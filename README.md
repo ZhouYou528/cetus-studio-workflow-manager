@@ -112,7 +112,7 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 - [x] **Phase 6a**:Phase 5 技术债修复 — 6 处 `startsWith` 残留分隔符;级联删除走 `setXxx` 消除 404 噪音;时区:前端按本地 TZ 拼 `?date=&dow=&dom=` 传给后端,服务器默认 UTC 兜底;DELETE 路由返回 `trashId` 让删除后立刻能恢复
 - [x] **Phase 6b**:拆组件 + 加类型 — 主文件 2050 → 1122 行;抽出 6 个 Modal/Dialog、3 个 Card、3 个 View 到独立文件;每个组件加 props 类型;共享类型在 `lib/types.ts`
 - [x] **Phase 7**:GitHub 私有仓库,持续 push
-- [x] **Phase 8**:Cloudflare 部署 — 远程 D1 + Worker + Pages + 服务绑定 + Cloudflare Access(邮箱 OTP 登录,team domain `cetus-studio.cloudflareaccess.com`)+ Users 管理 tab(owner 给队友分配 assignedRoles)+ 顶栏 Sign Out 按钮
+- [x] **Phase 8**:Cloudflare 部署 — 远程 D1 + Worker + Pages + 服务绑定 + Cloudflare Access(邮箱 OTP 登录,team domain `cetus-studio.cloudflareaccess.com`)+ Users 管理 tab(owner 给队友分配 assignedRoles)+ 顶栏 Sign Out + 用户名(name)字段:`PATCH /api/me` 任何用户自改 name,顶栏点击邮箱区域弹自编辑;assistant 在职位职责 tab 只能看到自己 assignedRoles 里的职位卡片
 
 ---
 
@@ -135,6 +135,7 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 
 **Bootstrap 模式**
 - `GET /api/bootstrap` 一次返回所有应用状态(roles/tasks/projects/albumDesigns/trash + 3 个 completion 字典),形状对齐前端 9 个 state slot,使 `useEffect` 极简
+- bootstrap 按用户权限过滤:owner 全部可见;assistant 只见 `assignedRoles` 里的 roles + tasks(职位职责 tab 自动只展示能管的卡片);trash 也只 owner 看到
 - 前端 9 个 `updateXxx` 函数签名保持原样,内部 diff 当前 state vs 新值,触发增/删/改 API。组件代码完全不知道有 API
 
 **完成态键格式**(全用 `|` 分隔,避免 `p_abc_r1_pt1_3` 这种含 `_` 的 ID 解析歧义)
@@ -149,6 +150,7 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 **软删 + 30 天回收站**
 - 所有 DELETE 走 `moveToTrash()`:把完整 JSON 存 `trash.item_data`,关联完成记录存 `related_data`,30 天后 `GET /api/trash` lazy 清理
 - 恢复:`POST /api/trash/:id/restore` 反向 INSERT 回原表 + 完成记录回写;客户端 setState 直接读 `itemData`,不再走 `updateXxx` diff(避免重复 API 调用)
+- 权限:owner 看/操作所有 trash 行;assistant 看/操作自己 `deleted_by=email` 的行 — 每个用户都能撤销自己的误删
 
 **同域部署**
 线上前后端共用一个域名 `studio.xxx.com`:Pages 托管前端,通过 Pages Functions 把 `/api/*` 路由给 Worker。本地用 Vite 的 proxy 模拟同域行为。

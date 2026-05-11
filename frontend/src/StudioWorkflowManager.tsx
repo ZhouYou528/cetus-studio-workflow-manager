@@ -15,6 +15,7 @@ import TodayView from './views/TodayView';
 import WeeklyView from './views/WeeklyView';
 import TrashView from './views/TrashView';
 import UsersView from './views/UsersView';
+import UserEditModal from './components/UserEditModal';
 
 const DEFAULT_ROLES = [
   { id: 'r1', name: '主摄影师', icon: '📸', isAssistant: false, supportsProjects: true, duties: '负责拍摄方案制定、现场拍摄主导、把控整体画面质量、与客户沟通拍摄需求', color: 'bg-blue-500' },
@@ -141,6 +142,7 @@ export default function StudioWorkflowManager() {
   const [editingAlbum, setEditingAlbum] = useState(null);
   const [expandedAlbum, setExpandedAlbum] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null); // {title, message, onConfirm}
+  const [showSelfEdit, setShowSelfEdit] = useState(false);
 
   // ── 数据装载 ───────────────────────────────────────────
   // 启动时 GET /api/bootstrap 一次拿全部应用状态。后续状态改动由 updateXxx 增量同步。
@@ -616,10 +618,19 @@ export default function StudioWorkflowManager() {
               </div>
               {currentUser && (
                 <div className="border-l border-slate-200 pl-3 flex items-center gap-2">
-                  <div className="text-right max-w-[140px]">
-                    <div className="text-xs text-slate-500 truncate">{currentUser.role === 'owner' ? 'Owner' : 'Assistant'}</div>
-                    <div className="text-xs font-medium text-slate-700 truncate" title={currentUser.email}>{currentUser.email}</div>
-                  </div>
+                  <button
+                    onClick={() => setShowSelfEdit(true)}
+                    className="text-right max-w-[160px] hover:bg-slate-100 rounded-lg px-2 py-1 -my-1"
+                    title="编辑我的显示名"
+                  >
+                    <div className="text-xs font-medium text-slate-700 truncate">
+                      {currentUser.name || currentUser.email}
+                    </div>
+                    <div className="text-xs text-slate-500 truncate">
+                      {currentUser.role === 'owner' ? 'Owner' : 'Assistant'}
+                      {currentUser.name && <span className="text-slate-400"> · {currentUser.email.split('@')[0]}</span>}
+                    </div>
+                  </button>
                   <a
                     href="/cdn-cgi/access/logout"
                     className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"
@@ -729,13 +740,12 @@ export default function StudioWorkflowManager() {
                 const roleTasks = [...tasks.filter(t => t.roleId === role.id), ...linkedTasks];
                 const roleProjects = role.supportsProjects ? getVisibleProjectsForRole(role.id) : [];
                 
+                // 待办计数:任何未勾选的任务都算"待办"。frequency 只影响 TodayView 里"何时展示",
+                // 不应影响这里的"是否已完成"。临时/每周非周一/每月非1号任务以前被错误地不计数。
                 const uncompletedDaily = roleTasks.filter(t => {
                   const isLinked = t.frequency === '项目联动';
-                  if (isLinked) return !completions[t.completionKey];
-                  const isToday = (t.frequency === '每日') || 
-                    (t.frequency === '每周' && new Date().getDay() === (t.weekday ?? 1)) ||
-                    (t.frequency === '每月' && new Date().getDate() === (t.monthday ?? 1));
-                  return isToday && !completions[`${t.id}|${todayKey}`];
+                  const key = isLinked ? t.completionKey : `${t.id}|${todayKey}`;
+                  return !completions[key];
                 }).length;
                 
                 const uncompletedProjectTasks = roleProjects.reduce((sum, p) => {
@@ -962,12 +972,10 @@ export default function StudioWorkflowManager() {
                                 
                                 return (
                                   <div key={t.id} className={`bg-white rounded-lg p-2.5 flex items-center gap-2.5 ${isLinked ? 'border border-rose-200 bg-rose-50/30' : (isToday && !isCompleted ? 'border border-blue-200' : '')}`}>
-                                    {(isToday || isLinked) && (
-                                      <button onClick={(e) => { e.stopPropagation(); updateCompletions({ ...completions, [completionKey]: !isCompleted }); }}
-                                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
-                                        {isCompleted && <Check className="w-3 h-3 text-white" />}
-                                      </button>
-                                    )}
+                                    <button onClick={(e) => { e.stopPropagation(); updateCompletions({ ...completions, [completionKey]: !isCompleted }); }}
+                                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
+                                      {isCompleted && <Check className="w-3 h-3 text-white" />}
+                                    </button>
                                     <div className="flex-1 min-w-0">
                                       <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 line-through' : 'text-slate-800'} truncate`}>{t.name}</div>
                                       <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5 flex-wrap">
@@ -1055,11 +1063,13 @@ export default function StudioWorkflowManager() {
               </div>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 p-5">
-              <h3 className="font-semibold text-slate-900 mb-4">各职位任务分布</h3>
+              <h3 className="font-semibold text-slate-900 mb-4">各职位今日完成进度</h3>
               <div className="space-y-3">
                 {roles.map(role => {
-                  const count = tasks.filter(t => t.roleId === role.id).length;
-                  const max = Math.max(...roles.map(r => tasks.filter(t => t.roleId === r.id).length), 1);
+                  const roleTasksAll = tasks.filter(t => t.roleId === role.id);
+                  const total = roleTasksAll.length;
+                  const done = roleTasksAll.filter(t => completions[`${t.id}|${todayKey}`]).length;
+                  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
                   return (
                     <div key={role.id}>
                       <div className="flex items-center justify-between mb-1.5">
@@ -1068,10 +1078,10 @@ export default function StudioWorkflowManager() {
                           <span className="text-slate-700">{role.name}</span>
                           {role.isAssistant && <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">助理</span>}
                         </div>
-                        <span className="text-sm font-medium text-slate-900">{count}</span>
+                        <span className="text-sm font-medium text-slate-900">{done}/{total} · {pct}%</span>
                       </div>
                       <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                        <div className={`h-full ${role.color} transition-all`} style={{ width: `${(count/max)*100}%` }} />
+                        <div className={`h-full ${total > 0 ? role.color : 'bg-slate-200'} transition-all`} style={{ width: `${pct}%` }} />
                       </div>
                     </div>
                   );
@@ -1082,7 +1092,7 @@ export default function StudioWorkflowManager() {
         )}
 
         {activeTab === 'users' && currentUser?.role === 'owner' && (
-          <UsersView roles={roles} currentEmail={currentUser.email} />
+          <UsersView roles={roles} currentEmail={currentUser.email} onSelfUpdate={setCurrentUser} />
         )}
       </div>
 
@@ -1131,6 +1141,19 @@ export default function StudioWorkflowManager() {
             else updateAlbumDesigns([...albumDesigns, { id: `album${Date.now()}`, ...albumData }]);
             setShowAddAlbum(false); setEditingAlbum(null);
           }} />
+      )}
+
+      {showSelfEdit && currentUser && (
+        <UserEditModal
+          user={currentUser}
+          roles={roles}
+          selfEdit
+          onClose={() => setShowSelfEdit(false)}
+          onSave={async (patch) => {
+            const updated = await api.updateMe({ name: patch.name ?? null });
+            setCurrentUser(updated);
+          }}
+        />
       )}
 
       {confirmDialog && (

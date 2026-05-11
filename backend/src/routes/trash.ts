@@ -2,34 +2,43 @@ import { Hono } from 'hono';
 import type { Bindings } from '../index';
 import { all, one } from '../db';
 import type { AuthUser } from '../db';
-import { requireOwner } from '../auth';
 
 const app = new Hono<{ Bindings: Bindings; Variables: { user: AuthUser } }>();
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
-// 列出回收站。顺手做 lazy 清理:30 天以上的物理删除。
-// (Cloudflare Workers 没有定时任务的免费版,放在 GET 路径里 "搂草打兔子",代价可忽略)
-app.get('/', requireOwner, async (c) => {
+// 权限模型:
+//   - owner 看到/操作所有 trash 行
+//   - assistant 只能看到/操作自己 deleted_by=email 的行
+// 共用 helper:对 owner 不加 scope,对其他人加 `AND deleted_by = ?`。
+function scopeWhere(user: AuthUser): { sql: string; binds: unknown[] } {
+  if (user.role === 'owner') return { sql: '', binds: [] };
+  return { sql: ' AND deleted_by = ?', binds: [user.email] };
+}
+
+// 列出回收站(自己的或全部)。顺手做 lazy 清理:30 天以上的物理删除。
+app.get('/', async (c) => {
   const cutoff = Date.now() - THIRTY_DAYS_MS;
   await c.env.DB.prepare(`DELETE FROM trash WHERE deleted_at < ?`).bind(cutoff).run();
 
+  const { sql, binds } = scopeWhere(c.var.user);
   const items = await all(
     c,
-    `SELECT id, type, item_data, related_data, deleted_at, deleted_by FROM trash ORDER BY deleted_at DESC`,
+    `SELECT id, type, item_data, related_data, deleted_at, deleted_by FROM trash WHERE 1=1${sql} ORDER BY deleted_at DESC`,
+    ...binds,
   );
   return c.json({ items });
 });
 
-// 恢复:按 type 反向 INSERT 回原表 + 把 related_data 也回写。
-// 如果原 id 已经被新建占用(罕见),返回 409。
-app.post('/:id/restore', requireOwner, async (c) => {
+// 恢复:assistant 只能恢复自己删的
+app.post('/:id/restore', async (c) => {
   const id = c.req.param('id');
+  const { sql, binds } = scopeWhere(c.var.user);
   const item = await one<{
     type: 'task' | 'project' | 'album' | 'role';
     itemData: Record<string, unknown>;
     relatedData: Record<string, unknown> | null;
-  }>(c, `SELECT type, item_data, related_data FROM trash WHERE id = ?`, id);
+  }>(c, `SELECT type, item_data, related_data FROM trash WHERE id = ?${sql}`, id, ...binds);
   if (!item) return c.json({ error: 'not_found' }, 404);
 
   const conflict = await checkRestoreConflict(c, item.type, item.itemData);
@@ -45,17 +54,22 @@ app.post('/:id/restore', requireOwner, async (c) => {
   }
 });
 
-// 永久删除单条
-app.delete('/:id', requireOwner, async (c) => {
+// 永久删除单条:assistant 只能删自己的
+app.delete('/:id', async (c) => {
   const id = c.req.param('id');
-  const res = await c.env.DB.prepare(`DELETE FROM trash WHERE id = ?`).bind(id).run();
+  const { sql, binds } = scopeWhere(c.var.user);
+  const res = await c.env.DB
+    .prepare(`DELETE FROM trash WHERE id = ?${sql}`)
+    .bind(id, ...binds)
+    .run();
   if (!res.success || res.meta?.changes === 0) return c.json({ error: 'not_found' }, 404);
   return c.json({ ok: true });
 });
 
-// 清空
-app.delete('/', requireOwner, async (c) => {
-  await c.env.DB.prepare(`DELETE FROM trash`).run();
+// 清空:owner 清全部;assistant 清自己的
+app.delete('/', async (c) => {
+  const { sql, binds } = scopeWhere(c.var.user);
+  await c.env.DB.prepare(`DELETE FROM trash WHERE 1=1${sql}`).bind(...binds).run();
   return c.json({ ok: true });
 });
 

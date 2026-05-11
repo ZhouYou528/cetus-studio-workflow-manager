@@ -89,7 +89,10 @@ export const api = {
   bootstrap: () => call<Bootstrap>('GET', `/api/bootstrap?${localDateParams()}`),
   me: () => call<User>('GET', '/api/me'),
 
-  // users(owner only)
+  // users
+  // 自己改自己的名字(任何登录用户都能)
+  updateMe: (body: { name: string | null }) => call<User>('PATCH', '/api/users/me', body),
+  // owner-only
   listUsers: () => call<{ users: User[] }>('GET', '/api/users'),
   updateUser: (email: string, body: Partial<Pick<User, 'role' | 'assignedRoles' | 'name'>>) =>
     call<User>('PATCH', `/api/users/${encodeURIComponent(email)}`, body),

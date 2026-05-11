@@ -25,23 +25,27 @@ app.get('/', async (c) => {
     : new Date().toISOString().slice(0, 10);
 
   // ── 主表 ────────────────────────────────────────
-  const roles = await all(c, `SELECT * FROM roles ORDER BY display_order`);
-  // tasks 按用户权限过滤
+  // roles 和 tasks 都按用户权限过滤:
+  //   - owner 全部可见
+  //   - assistant 只见 assignedRoles 里的(没分配 → 空数组)
+  // 这样"职位职责" tab 自动只展示用户能管的卡片。
+  let roles: unknown[] = [];
   let tasks: unknown[] = [];
   if (user.role === 'owner') {
+    roles = await all(c, `SELECT * FROM roles ORDER BY display_order`);
     tasks = await all(c, `SELECT * FROM tasks ORDER BY role_id, id`);
   } else if (user.assignedRoles.length > 0) {
     const placeholders = user.assignedRoles.map(() => '?').join(',');
+    roles = await all(c, `SELECT * FROM roles WHERE id IN (${placeholders}) ORDER BY display_order`, ...user.assignedRoles);
     tasks = await all(c, `SELECT * FROM tasks WHERE role_id IN (${placeholders}) ORDER BY role_id, id`, ...user.assignedRoles);
   }
   const projects = await all(c, `SELECT * FROM projects ORDER BY shoot_date DESC`);
   const albumDesigns = await all(c, `SELECT * FROM album_designs ORDER BY start_date DESC`);
 
-  // trash 只 owner 看;assistant 给空数组(权限 UI 上隐藏 tab 即可)
-  const trash =
-    user.role === 'owner'
-      ? await all(c, `SELECT id, type, item_data, related_data, deleted_at, deleted_by FROM trash ORDER BY deleted_at DESC`)
-      : [];
+  // trash:owner 看全部;assistant 看自己删除的(by deleted_by)
+  const trash = user.role === 'owner'
+    ? await all(c, `SELECT id, type, item_data, related_data, deleted_at, deleted_by FROM trash ORDER BY deleted_at DESC`)
+    : await all(c, `SELECT id, type, item_data, related_data, deleted_at, deleted_by FROM trash WHERE deleted_by = ? ORDER BY deleted_at DESC`, user.email);
 
   // ── 三种 completion 字典 ──────────────────────────
   // completions: 今天的日常任务完成 + Marketing 联动完成(后者无日期)

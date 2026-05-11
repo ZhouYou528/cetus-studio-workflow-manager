@@ -7,9 +7,10 @@ import UserEditModal from '../components/UserEditModal';
 type Props = {
   roles: Role[];
   currentEmail: string;
+  onSelfUpdate?: (u: User) => void;
 };
 
-export default function UsersView({ roles, currentEmail }: Props) {
+export default function UsersView({ roles, currentEmail, onSelfUpdate }: Props) {
   const [users, setUsers] = useState<User[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<User | null>(null);
@@ -27,9 +28,15 @@ export default function UsersView({ roles, currentEmail }: Props) {
 
   useEffect(() => { load(); }, []);
 
-  const handleSave = async (patch: { role: 'owner' | 'assistant'; assignedRoles: string[] }) => {
+  const handleSave = async (patch: { name?: string | null; role?: 'owner' | 'assistant'; assignedRoles?: string[] }) => {
     if (!editing) return;
-    await api.updateUser(editing.email, patch);
+    // 自编辑只能改 name(后端 PATCH /:email 是 owner-only,自己改自己走 PATCH /api/me)
+    if (editing.email === currentEmail && patch.role === undefined && patch.assignedRoles === undefined) {
+      const updated = await api.updateMe({ name: patch.name ?? null });
+      onSelfUpdate?.(updated);
+    } else {
+      await api.updateUser(editing.email, patch);
+    }
     await load();
   };
 
@@ -112,9 +119,8 @@ export default function UsersView({ roles, currentEmail }: Props) {
                 </div>
                 <button
                   onClick={() => setEditing(u)}
-                  disabled={isMe}
-                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-                  title={isMe ? '不能编辑自己,防止误降权' : '编辑权限'}
+                  className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 shrink-0"
+                  title={isMe ? '编辑我的显示名' : '编辑权限'}
                 >
                   <Edit2 className="w-4 h-4" />
                 </button>
@@ -128,6 +134,7 @@ export default function UsersView({ roles, currentEmail }: Props) {
         <UserEditModal
           user={editing}
           roles={roles}
+          selfEdit={editing.email === currentEmail}
           onClose={() => setEditing(null)}
           onSave={handleSave}
         />

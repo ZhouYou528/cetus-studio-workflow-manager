@@ -9,6 +9,19 @@ const app = new Hono<{ Bindings: Bindings; Variables: { user: AuthUser } }>();
 // 当前登录用户
 app.get('/me', (c) => c.json(c.var.user));
 
+// 用户自己改自己的 name(其他字段不允许 — role/assignedRoles 走 PATCH /:email,owner-only)
+app.patch('/me', async (c) => {
+  const body = await c.req.json<{ name?: string | null }>().catch(() => ({} as { name?: string | null }));
+  if (body.name === undefined) return c.json({ error: 'no_fields' }, 400);
+  const name = typeof body.name === 'string' ? body.name.trim() : null;
+  await c.env.DB
+    .prepare(`UPDATE users SET name = ? WHERE email = ?`)
+    .bind(name || null, c.var.user.email)
+    .run();
+  const updated = await one(c, `SELECT email, name, role, assigned_roles, created_at FROM users WHERE email = ?`, c.var.user.email);
+  return c.json(updated);
+});
+
 // 所有用户(仅 owner)
 app.get('/', requireOwner, async (c) => {
   const users = await all(c, `SELECT email, name, role, assigned_roles, created_at FROM users ORDER BY created_at DESC`);
