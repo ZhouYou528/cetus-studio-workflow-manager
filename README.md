@@ -113,6 +113,7 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 - [x] **Phase 6b**:拆组件 + 加类型 — 主文件 2050 → 1122 行;抽出 6 个 Modal/Dialog、3 个 Card、3 个 View 到独立文件;每个组件加 props 类型;共享类型在 `lib/types.ts`
 - [x] **Phase 7**:GitHub 私有仓库,持续 push
 - [x] **Phase 8**:Cloudflare 部署 — 远程 D1 + Worker + Pages + 服务绑定 + Cloudflare Access(邮箱 OTP 登录,team domain `cetus-studio.cloudflareaccess.com`)+ Users 管理 tab(owner 给队友分配 assignedRoles)+ 顶栏 Sign Out + 用户名(name)字段:`PATCH /api/me` 任何用户自改 name,顶栏点击邮箱区域弹自编辑;assistant 在职位职责 tab 只能看到自己 assignedRoles 里的职位卡片
+- [x] **Phase 9**:嵌套子任务 — `tasks` 表加 `parent_task_id` + 索引;任务可拆解成子任务,子任务再可拆解(后端限制最多 5 层);子任务继承父任务的 `roleId`(避免跨职位污染);删除父任务时 BFS 收集所有后代一起进回收站,恢复时整树重建;前端通用 `SubtaskTree` 递归组件 — 顶层任务行加 ▶/▼ 展开按钮 + `N/M` 完成度徽章,展开后行内输入框「+ 添加子任务」直接 Enter 提交;3 处任务渲染(职位职责 tab、TodayView、WeeklyView)统一过滤 `!parentTaskId` 只显示顶层,子任务嵌在父任务展开里
 
 ---
 
@@ -163,6 +164,15 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 - 任务行下方追加一行 `text-xs line-clamp-2` 显示 description 预览
 - 3 处任务渲染:TodayView 日常任务、WeeklyView 周任务、职位职责 tab 任务清单
 - 主文件 `useMemo` 算 `taskAttachmentCounts` map,自动跟着 attachments 状态变化
+
+**嵌套子任务**
+- DB:`tasks` 表加 `parent_task_id TEXT`(自引用 FK)+ `idx_tasks_parent` 索引;为空 = 顶层任务,非空 = 子任务
+- 后端规则:POST `/api/tasks` 接受 `parentTaskId`;**强制继承父的 `roleId`**(避免跨职位污染);写入前往上走父链最多 5 层,超过 5 层返回 `max_depth_exceeded`
+- 后端级联删除:DELETE 时 BFS 收集所有后代,把根+后代一起 INSERT 进 `trash.related_data.descendants`,再批量 `DELETE` 任务行 + 关联完成记录;**恢复**时整树重建(根+所有后代)
+- 前端组件:`SubtaskTree` 递归组件 — 父组件传 `childrenByParent` map(`useMemo` 派生),自己管展开状态;子行有 checkbox / 编辑 / 删除按钮;末端节点显示 ▶ 加号触发行内输入,Enter 提交,Esc 取消
+- 顶层任务行加 `▶/▼ {done}/{total}` 徽章(数字只算直接子级,不深递归);展开后下面挂 `<SubtaskTree>` 显示所有后代树
+- 3 处统一过滤 `!parentTaskId`:职位职责 tab `roleTasks.filter` / TodayView 的 `todayTasks` 在主文件 filter 时排除 / WeeklyView 的 `weeklyTasks` 内部 filter
+- 完成度只看顶层任务,子任务自成进度(防止 N/M 受嵌套层级影响)
 
 **附件功能(任务/项目/相册)**
 - 存储:**Cloudflare R2** 桶 `studio-attachments`(免费 10 GB,零出站流量费),桶私有所有读写经 Worker

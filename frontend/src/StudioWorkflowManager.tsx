@@ -17,6 +17,7 @@ import TrashView from './views/TrashView';
 import UsersView from './views/UsersView';
 import UserEditModal from './components/UserEditModal';
 import HeaderControls from './components/HeaderControls';
+import SubtaskTree from './components/SubtaskTree';
 import { useT } from './lib/i18n';
 
 const DEFAULT_ROLES = [
@@ -138,6 +139,48 @@ export default function StudioWorkflowManager() {
     });
     return map;
   }, [attachments]);
+
+  // 子任务索引:parentTaskId → 该父下的所有直接子任务,递归展开时用
+  const childrenByParent = React.useMemo(() => {
+    const map = {};
+    tasks.forEach(t => {
+      const pid = t.parentTaskId;
+      if (pid) {
+        if (!map[pid]) map[pid] = [];
+        map[pid].push(t);
+      }
+    });
+    return map;
+  }, [tasks]);
+
+  // 顶层任务(parentTaskId 为空)展开/折叠状态,跨 tab 共享
+  const [expandedTasks, setExpandedTasks] = useState(new Set());
+  const toggleExpand = (id) => setExpandedTasks(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  // 给"添加子任务"用 — 复用 updateTasks 的 diff 路径,自动 POST /api/tasks
+  // 用 timestamp + 随机后缀确保 id 唯一(连续添加时同一 ms 不冲突);
+  // backend POST 接受 client 提供的 id,这样子任务可立刻被孙任务引用,无需等 server 回响。
+  const addSubtask = (parentId, name) => {
+    const parent = tasks.find(t => t.id === parentId);
+    if (!parent) return;
+    const newTask = {
+      id: `t_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+      name: name.trim(),
+      parentTaskId: parentId,
+      roleId: parent.roleId,
+      frequency: parent.frequency,
+      duration: null,
+      description: '',
+      dueDate: null,
+      isWeekly: false,
+      createdAt: Date.now(),
+    };
+    updateTasks([...tasks, newTask]);
+  };
   const [currentUser, setCurrentUser] = useState(null);
   
   const [showAddRole, setShowAddRole] = useState(false);
@@ -547,6 +590,7 @@ export default function StudioWorkflowManager() {
   
   const todayTasks = [
     ...tasks.filter(t => {
+      if (t.parentTaskId) return false; // 子任务不出现在顶层 today 列表,只在父任务展开里出现
       if (t.frequency === '每日') return true;
       if (t.frequency === '每周' && new Date().getDay() === (t.weekday ?? 1)) return true;
       if (t.frequency === '每月' && new Date().getDate() === (t.monthday ?? 1)) return true;
@@ -717,6 +761,31 @@ export default function StudioWorkflowManager() {
             updateProjectCompletions={updateProjectCompletions}
             albumCompletions={albumCompletions} updateAlbumCompletions={updateAlbumCompletions}
             taskAttachmentCounts={taskAttachmentCounts}
+            childrenByParent={childrenByParent}
+            expandedTasks={expandedTasks}
+            toggleExpand={toggleExpand}
+            addSubtask={addSubtask}
+            onEditTask={setEditingTask}
+            onDeleteTask={(task) => {
+              setConfirmDialog({
+                title: ti('confirm_title_delete_task', { name: task.name }),
+                message: ti('confirm_dialog_msg_task_delete'),
+                onConfirm: () => {
+                  const relatedC = {};
+                  Object.keys(completions).forEach(key => {
+                    if (key.startsWith(`${task.id}|`)) relatedC[key] = completions[key];
+                  });
+                  moveToTrash('task', task, relatedC);
+                  updateTasks(tasks.filter(x => x.id !== task.id));
+                  const cleaned = { ...completions };
+                  Object.keys(cleaned).forEach(key => {
+                    if (key.startsWith(`${task.id}|`)) delete cleaned[key];
+                  });
+                  setCompletions(cleaned);
+                  setConfirmDialog(null);
+                }
+              });
+            }}
           />
         )}
 
@@ -725,6 +794,10 @@ export default function StudioWorkflowManager() {
             tasks={tasks} roles={roles} completions={completions} todayKey={todayKey}
             updateCompletions={updateCompletions} splitTask={splitTask}
             taskAttachmentCounts={taskAttachmentCounts}
+            childrenByParent={childrenByParent}
+            expandedTasks={expandedTasks}
+            toggleExpand={toggleExpand}
+            addSubtask={addSubtask}
             onEdit={setEditingTask}
             onDelete={(task) => {
               setConfirmDialog({
@@ -1002,7 +1075,7 @@ export default function StudioWorkflowManager() {
                             <p className="text-xs text-slate-400 dark:text-slate-500 italic py-2">{ti('no_daily_tasks_yet')}</p>
                           ) : (
                             <div className="space-y-1.5">
-                              {roleTasks.map(t => {
+                              {roleTasks.filter(t => !t.parentTaskId).map(t => {
                                 const isLinked = t.frequency === '项目联动';
                                 const completionKey = isLinked ? t.completionKey : `${t.id}|${todayKey}`;
                                 const isCompleted = completions[completionKey];
@@ -1010,9 +1083,14 @@ export default function StudioWorkflowManager() {
                                   (t.frequency === '每周' && new Date().getDay() === (t.weekday ?? 1)) ||
                                   (t.frequency === '每月' && new Date().getDate() === (t.monthday ?? 1));
                                 const attCount = taskAttachmentCounts[t.id] ?? 0;
+                                const kids = childrenByParent[t.id] || [];
+                                const childTotal = kids.length;
+                                const childDone = kids.filter(k => completions[`${k.id}|${todayKey}`]).length;
+                                const isExpanded = expandedTasks.has(t.id);
 
                                 return (
-                                  <div key={t.id} className={`bg-white dark:bg-slate-900 rounded-lg p-2.5 flex items-start gap-2.5 ${isLinked ? 'border border-rose-200 bg-rose-50/30' : (isToday && !isCompleted ? 'border border-blue-200' : '')}`}>
+                                  <div key={t.id} className={`bg-white dark:bg-slate-900 rounded-lg ${isLinked ? 'border border-rose-200 bg-rose-50/30' : (isToday && !isCompleted ? 'border border-blue-200' : '')}`}>
+                                    <div className="p-2.5 flex items-start gap-2.5">
                                     <button onClick={(e) => { e.stopPropagation(); updateCompletions({ ...completions, [completionKey]: !isCompleted }); }}
                                       className={`w-5 h-5 mt-0.5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 dark:border-slate-600'}`}>
                                       {isCompleted && <Check className="w-3 h-3 text-white" />}
@@ -1024,6 +1102,18 @@ export default function StudioWorkflowManager() {
                                           <span className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded inline-flex items-center gap-0.5">
                                             <Paperclip className="w-3 h-3" />{attCount}
                                           </span>
+                                        )}
+                                        {!isLinked && (
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); toggleExpand(t.id); }}
+                                            className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 inline-flex items-center gap-0.5 px-1.5 py-1 sm:py-0.5 -my-1 sm:-my-0.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+                                            title={childTotal > 0 ? '' : ti('add_subtask')}
+                                          >
+                                            {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                            {childTotal > 0 && (
+                                              <span>{ti('subtasks_progress', { done: childDone, total: childTotal })}</span>
+                                            )}
+                                          </button>
                                         )}
                                       </div>
                                       <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5 flex-wrap">
@@ -1049,7 +1139,7 @@ export default function StudioWorkflowManager() {
                                         <button onClick={(e) => { e.stopPropagation(); setEditingTask(t); }} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500 dark:text-slate-400" title={ti('edit')}>
                                           <Edit2 className="w-3.5 h-3.5" />
                                         </button>
-                                        <button onClick={(e) => { 
+                                        <button onClick={(e) => {
                                           e.stopPropagation();
                                           setConfirmDialog({
                                             title: ti('confirm_title_delete_task', { name: t.name }),
@@ -1074,6 +1164,46 @@ export default function StudioWorkflowManager() {
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
                                       </>
+                                    )}
+                                    </div>
+                                    {isExpanded && !isLinked && (
+                                      // pl-[19px] 让第一层竖线中心对齐父圆圈(p-2.5 + w-5 → 中心 20px;border 居中 = 19+1)
+                                      <div className="pl-[19px] pr-2.5 pb-2.5 -mt-0.5">
+                                        <SubtaskTree
+                                          parentTaskId={t.id}
+                                          childrenByParent={childrenByParent}
+                                          taskAttachmentCounts={taskAttachmentCounts}
+                                          completions={completions}
+                                          todayKey={todayKey}
+                                          level={1}
+                                          onToggleComplete={(task) => {
+                                            const k = `${task.id}|${todayKey}`;
+                                            updateCompletions({ ...completions, [k]: !completions[k] });
+                                          }}
+                                          onEdit={(task) => setEditingTask(task)}
+                                          onDelete={(task) => {
+                                            setConfirmDialog({
+                                              title: ti('confirm_title_delete_task', { name: task.name }),
+                                              message: ti('confirm_dialog_msg_task_delete'),
+                                              onConfirm: () => {
+                                                const relatedC = {};
+                                                Object.keys(completions).forEach(key => {
+                                                  if (key.startsWith(`${task.id}|`)) relatedC[key] = completions[key];
+                                                });
+                                                moveToTrash('task', task, relatedC);
+                                                updateTasks(tasks.filter(x => x.id !== task.id));
+                                                const cleaned = { ...completions };
+                                                Object.keys(cleaned).forEach(key => {
+                                                  if (key.startsWith(`${task.id}|`)) delete cleaned[key];
+                                                });
+                                                setCompletions(cleaned);
+                                                setConfirmDialog(null);
+                                              }
+                                            });
+                                          }}
+                                          onAddSubtask={addSubtask}
+                                        />
+                                      </div>
                                     )}
                                   </div>
                                 );

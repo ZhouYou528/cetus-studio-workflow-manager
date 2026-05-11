@@ -34,15 +34,16 @@ CREATE TABLE IF NOT EXISTS roles (
 -- due_date: 只在 frequency='临时' 时填,格式 'YYYY-MM-DD'
 -- is_weekly: 在本周待办视图显示
 CREATE TABLE IF NOT EXISTS tasks (
-  id          TEXT PRIMARY KEY,
-  role_id     TEXT NOT NULL,
-  name        TEXT NOT NULL,
-  frequency   TEXT NOT NULL,
-  duration    INTEGER,
-  description TEXT,
-  due_date    TEXT,
-  is_weekly   INTEGER NOT NULL DEFAULT 0,
-  created_at  INTEGER NOT NULL,
+  id             TEXT PRIMARY KEY,
+  role_id        TEXT NOT NULL,
+  name           TEXT NOT NULL,
+  frequency      TEXT NOT NULL,
+  duration       INTEGER,
+  description    TEXT,
+  due_date       TEXT,
+  is_weekly      INTEGER NOT NULL DEFAULT 0,
+  created_at     INTEGER NOT NULL,
+  parent_task_id TEXT,                       -- 自引用:子任务指向父;顶层任务为 NULL
   FOREIGN KEY (role_id) REFERENCES roles(id)
 );
 
@@ -140,3 +141,4 @@ CREATE INDEX IF NOT EXISTS idx_albums_start       ON album_designs(start_date);
 CREATE INDEX IF NOT EXISTS idx_trash_deleted      ON trash(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_proj_compl_project ON project_completions(project_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_parent ON attachments(parent_type, parent_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id);

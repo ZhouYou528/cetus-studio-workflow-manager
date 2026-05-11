@@ -1,4 +1,5 @@
-import { CalendarDays, Check, Edit2, Paperclip, Sparkles, Trash2 } from 'lucide-react';
+import { CalendarDays, Check, ChevronDown, ChevronRight, Edit2, Paperclip, Sparkles, Trash2 } from 'lucide-react';
+import SubtaskTree from '../components/SubtaskTree';
 import { useT } from '../lib/i18n';
 import type { Role, Task } from '../lib/types';
 
@@ -12,11 +13,16 @@ type Props = {
   onEdit: (t: Task) => void;
   onDelete: (t: Task) => void;
   taskAttachmentCounts?: Record<string, number>;
+  childrenByParent?: Record<string, Task[]>;
+  expandedTasks?: Set<string>;
+  toggleExpand?: (id: string) => void;
+  addSubtask?: (parentId: string, name: string) => void;
 };
 
-export default function WeeklyView({ tasks, roles, completions, todayKey, updateCompletions, splitTask, onEdit, onDelete, taskAttachmentCounts }: Props) {
+export default function WeeklyView({ tasks, roles, completions, todayKey, updateCompletions, splitTask, onEdit, onDelete, taskAttachmentCounts, childrenByParent, expandedTasks, toggleExpand, addSubtask }: Props) {
   const t = useT();
-  const weeklyTasks = tasks.filter(x => x.isWeekly);
+  // 顶层周任务;子任务在父任务展开后通过 SubtaskTree 显示
+  const weeklyTasks = tasks.filter(x => x.isWeekly && !x.parentTaskId);
 
   // 按职位分组
   const tasksByRole: Record<string, Task[]> = {};
@@ -139,9 +145,14 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                     const isCompleted = !!completions[completionKey];
                     const priority = getPriorityFromDescription(x.description);
                     const attCount = taskAttachmentCounts?.[x.id] ?? 0;
+                    const kids = childrenByParent?.[x.id] || [];
+                    const childTotal = kids.length;
+                    const childDone = kids.filter(k => completions[`${k.id}|${todayKey}`]).length;
+                    const isExpanded = expandedTasks?.has(x.id) ?? false;
 
                     return (
-                      <div key={x.id} className={`p-3 flex items-start gap-3 transition ${isCompleted ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''}`}>
+                      <div key={x.id}>
+                        <div className={`p-3 flex items-start gap-3 transition ${isCompleted ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''}`}>
                         <button
                           onClick={() => updateCompletions({ ...completions, [completionKey]: !isCompleted })}
                           className={`w-5 h-5 mt-0.5 rounded-full border-2 flex items-center justify-center shrink-0 transition ${
@@ -159,6 +170,18 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                               <span className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded inline-flex items-center gap-0.5">
                                 <Paperclip className="w-3 h-3" />{attCount}
                               </span>
+                            )}
+                            {toggleExpand && (
+                              <button
+                                onClick={() => toggleExpand(x.id)}
+                                className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 inline-flex items-center gap-0.5 px-1.5 py-1 sm:py-0.5 -my-1 sm:-my-0.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+                                title={childTotal > 0 ? '' : t('add_subtask')}
+                              >
+                                {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                {childTotal > 0 && (
+                                  <span>{t('subtasks_progress', { done: childDone, total: childTotal })}</span>
+                                )}
+                              </button>
                             )}
                           </div>
                           <div className="flex items-center gap-2 mt-1.5 flex-wrap text-xs">
@@ -189,6 +212,27 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
+                        </div>
+                        {isExpanded && childrenByParent && addSubtask && (
+                          // pl-[21px] 对齐父圆圈中心 (p-3 + w-5/2 = 22px;border 居中 = 21+1)
+                          <div className="pl-[21px] pr-3 pb-3">
+                            <SubtaskTree
+                              parentTaskId={x.id}
+                              childrenByParent={childrenByParent}
+                              taskAttachmentCounts={taskAttachmentCounts || {}}
+                              completions={completions}
+                              todayKey={todayKey}
+                              level={1}
+                              onToggleComplete={(task) => {
+                                const k = `${task.id}|${todayKey}`;
+                                updateCompletions({ ...completions, [k]: !completions[k] });
+                              }}
+                              onEdit={onEdit}
+                              onDelete={onDelete}
+                              onAddSubtask={addSubtask}
+                            />
+                          </div>
+                        )}
                       </div>
                     );
                   })}

@@ -40,6 +40,7 @@ export type Task = {
   id: string; roleId: string; name: string; frequency: string;
   duration: number | null; description: string | null;
   dueDate: string | null; isWeekly: boolean; createdAt: number;
+  parentTaskId?: string | null;
 };
 export type Project = {
   id: string; clientName: string; shootType: string; shootDate: string;

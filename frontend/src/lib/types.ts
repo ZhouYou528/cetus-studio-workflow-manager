@@ -26,6 +26,7 @@ export type Task = {
   dueDate: string | null;
   isWeekly: boolean;
   createdAt: number;
+  parentTaskId?: string | null; // null = 顶层;非空 = 子任务
   // 部分老代码读 ?? 1,DB 里没有这两列;保留可选以兼容
   weekday?: number;
   monthday?: number;

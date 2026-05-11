@@ -121,8 +121,11 @@ app.get('/weekly', async (c) => {
 });
 
 // ── 创建 ─────────────────────────────────────────────────
+const MAX_NESTING_DEPTH = 5;
+
 app.post('/', async (c) => {
   const body = await c.req.json<{
+    id?: string;
     roleId: string;
     name: string;
     frequency: Frequency;
@@ -130,26 +133,66 @@ app.post('/', async (c) => {
     description?: string | null;
     dueDate?: string | null;
     isWeekly?: boolean;
+    parentTaskId?: string | null;
   }>();
 
-  if (!body.roleId || !body.name || !body.frequency) {
+  if (!body.name || !body.frequency) {
     return c.json({ error: 'missing_fields' }, 400);
   }
   if (!VALID_FREQ.includes(body.frequency)) {
     return c.json({ error: 'invalid_frequency' }, 400);
   }
 
+  // 子任务路径:从 parent 继承 roleId(用户传的会被忽略)
+  // 同时校验深度 ≤ 5
+  let roleId = body.roleId;
+  if (body.parentTaskId) {
+    const parent = await one<{ roleId: string; parentTaskId: string | null }>(
+      c,
+      `SELECT role_id, parent_task_id FROM tasks WHERE id = ?`,
+      body.parentTaskId,
+    );
+    if (!parent) return c.json({ error: 'parent_not_found' }, 400);
+
+    // 计算深度:从 parent 往上数
+    let depth = 1;
+    let cur: string | null = parent.parentTaskId;
+    while (cur && depth < MAX_NESTING_DEPTH + 2) {
+      const next = await one<{ parentTaskId: string | null }>(
+        c,
+        `SELECT parent_task_id FROM tasks WHERE id = ?`,
+        cur,
+      );
+      cur = next?.parentTaskId ?? null;
+      depth++;
+    }
+    if (depth >= MAX_NESTING_DEPTH) {
+      return c.json({ error: 'max_depth_exceeded', limit: MAX_NESTING_DEPTH }, 400);
+    }
+
+    // 强制继承父的 role,忽略 body.roleId
+    roleId = parent.roleId;
+  }
+
+  if (!roleId) return c.json({ error: 'missing_fields', missing: 'roleId' }, 400);
+
   // 权限:assistant 只能为自己 assignedRoles 里的职位建任务
   const ids = visibleRoleIds(c.var.user);
-  if (ids !== null && !ids.includes(body.roleId)) {
+  if (ids !== null && !ids.includes(roleId)) {
     return c.json({ error: 'forbidden', reason: 'role-not-assigned' }, 403);
   }
 
   // 引用完整性:role 必须存在
-  const role = await one(c, `SELECT id FROM roles WHERE id = ?`, body.roleId);
+  const role = await one(c, `SELECT id FROM roles WHERE id = ?`, roleId);
   if (!role) return c.json({ error: 'role_not_found' }, 400);
 
-  const id = genId('t');
+  // 接受 client 提供的 id(用于嵌套任务在同一 session 里立刻被子任务引用的场景);
+  // 不合法或缺失时回退到 server-side genId('t')。
+  const id = body.id && /^[a-zA-Z0-9_-]{1,64}$/.test(body.id) ? body.id : genId('t');
+  // 防 id 冲突:若已存在,直接拒绝。
+  const existing = await one(c, `SELECT id FROM tasks WHERE id = ?`, id);
+  if (existing) return c.json({ error: 'id_collision' }, 409);
+
   const duration =
     body.duration === undefined || body.duration === null || body.duration === ''
       ? null
@@ -158,11 +201,11 @@ app.post('/', async (c) => {
       : body.duration;
 
   await c.env.DB
-    .prepare(`INSERT INTO tasks (id, role_id, name, frequency, duration, description, due_date, is_weekly, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .prepare(`INSERT INTO tasks (id, role_id, name, frequency, duration, description, due_date, is_weekly, created_at, parent_task_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(
       id,
-      body.roleId,
+      roleId,
       body.name,
       body.frequency,
       duration,
@@ -170,6 +213,7 @@ app.post('/', async (c) => {
       body.dueDate ?? null,
       body.isWeekly ? 1 : 0,
       Date.now(),
+      body.parentTaskId ?? null,
     )
     .run();
 
@@ -231,7 +275,7 @@ app.patch('/:id', async (c) => {
   return c.json(updated);
 });
 
-// ── 软删:连同 task_completions 一起进回收站 ──────────────
+// ── 软删:cascade 收集所有后代,一起进回收站 ────────────────
 app.delete('/:id', async (c) => {
   const id = c.req.param('id');
   const task = await one<{ roleId: string }>(c, `SELECT * FROM tasks WHERE id = ?`, id);
@@ -242,14 +286,40 @@ app.delete('/:id', async (c) => {
     return c.json({ error: 'forbidden' }, 403);
   }
 
-  const compls = await all(c, `SELECT * FROM task_completions WHERE task_id = ?`, id);
-  const trashId = await moveToTrash(c, 'task', task, { task_completions: compls });
+  // BFS 收集所有后代
+  const allIds: string[] = [id];
+  const descendants: unknown[] = [];
+  let frontier = [id];
+  while (frontier.length > 0) {
+    const placeholders = frontier.map(() => '?').join(',');
+    const children = await all(
+      c,
+      `SELECT * FROM tasks WHERE parent_task_id IN (${placeholders})`,
+      ...frontier,
+    );
+    if (children.length === 0) break;
+    descendants.push(...children);
+    frontier = children.map((c) => (c as { id: string }).id);
+    allIds.push(...frontier);
+  }
 
+  // 拉所有相关 task_completions(自己 + 后代)
+  const placeholders = allIds.map(() => '?').join(',');
+  const compls = await all(
+    c,
+    `SELECT * FROM task_completions WHERE task_id IN (${placeholders})`,
+    ...allIds,
+  );
+
+  const trashId = await moveToTrash(c, 'task', task, { task_completions: compls, descendants });
+
+  // 物理删:completions + tasks(覆盖整树)
   await c.env.DB.batch([
-    c.env.DB.prepare(`DELETE FROM task_completions WHERE task_id = ?`).bind(id),
-    c.env.DB.prepare(`DELETE FROM tasks WHERE id = ?`).bind(id),
+    c.env.DB.prepare(`DELETE FROM task_completions WHERE task_id IN (${placeholders})`).bind(...allIds),
+    c.env.DB.prepare(`DELETE FROM tasks WHERE id IN (${placeholders})`).bind(...allIds),
   ]);
-  return c.json({ ok: true, trashId });
+
+  return c.json({ ok: true, trashId, deletedCount: allIds.length });
 });
 
 // ── 完成 / 取消完成(按日期) ────────────────────────────

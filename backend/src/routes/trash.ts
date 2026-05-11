@@ -181,16 +181,30 @@ async function restoreItem(
   relatedData: Record<string, unknown> | null,
 ): Promise<void> {
   if (type === 'task') {
-    const t = itemData as {
+    type TaskRow = {
       id: string; roleId: string; name: string; frequency: string;
       duration: number | null; description: string | null;
       dueDate: string | null; isWeekly: boolean | number; createdAt: number;
+      parentTaskId?: string | null;
     };
-    await c.env.DB
-      .prepare(`INSERT INTO tasks (id, role_id, name, frequency, duration, description, due_date, is_weekly, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(t.id, t.roleId, t.name, t.frequency, t.duration, t.description, t.dueDate, t.isWeekly ? 1 : 0, t.createdAt)
-      .run();
+    const insertTask = async (t: TaskRow) => {
+      await c.env.DB
+        .prepare(`INSERT INTO tasks (id, role_id, name, frequency, duration, description, due_date, is_weekly, created_at, parent_task_id)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(t.id, t.roleId, t.name, t.frequency, t.duration, t.description, t.dueDate, t.isWeekly ? 1 : 0, t.createdAt, t.parentTaskId ?? null)
+        .run();
+    };
+
+    const root = itemData as TaskRow;
+    await insertTask(root);
+
+    // 后代:cascade delete 时存的子树。每个都是完整 task row(含自己的 parent_task_id),
+    // 直接 INSERT 即可 — 因为根已经回来了,parent FK 引用立刻有效。
+    const descendants = (relatedData?.descendants as TaskRow[] | undefined) ?? [];
+    for (const d of descendants) {
+      await insertTask(d);
+    }
+
     const compls = (relatedData?.task_completions as Array<{ taskId: string; completionDate: string; completedAt: number; completedBy: string | null }>) ?? [];
     for (const r of compls) {
       await c.env.DB
