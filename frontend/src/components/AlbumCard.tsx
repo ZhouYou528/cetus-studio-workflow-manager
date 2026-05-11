@@ -85,7 +85,7 @@ export default function AlbumCard({ album, tasks, completions, updateCompletions
                       {isToday && !isCompleted && <span className="text-blue-600 font-medium">· 今日</span>}
                     </div>
                   </div>
-                  {onSplit && (
+                  {import.meta.env.DEV && onSplit && (
                     <button onClick={(e) => { e.stopPropagation(); onSplit({ ...t, name: `${t.name} - ${album.clientName}` }); }}
                       className="p-1.5 hover:bg-slate-100 rounded text-slate-600"><Sparkles className="w-3.5 h-3.5" /></button>
                   )}

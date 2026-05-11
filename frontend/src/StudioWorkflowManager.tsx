@@ -2,7 +2,7 @@
 // 但组件代码仍保持 JS 风格;Phase 6 拆组件 + 加类型时移除此 pragma。
 import React, { useState, useEffect } from 'react';
 import { api, ApiError } from './lib/api';
-import { Camera, Users, ListTodo, Bell, BarChart3, Plus, Edit2, Trash2, Check, X, ChevronDown, ChevronRight, Clock, AlertCircle, CheckCircle2, Calendar, Briefcase, Sparkles, Loader2, FolderOpen, MapPin, User, CalendarDays, Archive } from 'lucide-react';
+import { Camera, Users, ListTodo, Bell, BarChart3, Plus, Edit2, Trash2, Check, X, ChevronDown, ChevronRight, Clock, AlertCircle, CheckCircle2, Calendar, Briefcase, Sparkles, Loader2, FolderOpen, MapPin, User, CalendarDays, Archive, LogOut, UserCog } from 'lucide-react';
 import ConfirmDialog from './components/ConfirmDialog';
 import RoleModal from './components/RoleModal';
 import TaskModal from './components/TaskModal';
@@ -14,6 +14,7 @@ import AlbumCard from './components/AlbumCard';
 import TodayView from './views/TodayView';
 import WeeklyView from './views/WeeklyView';
 import TrashView from './views/TrashView';
+import UsersView from './views/UsersView';
 
 const DEFAULT_ROLES = [
   { id: 'r1', name: '主摄影师', icon: '📸', isAssistant: false, supportsProjects: true, duties: '负责拍摄方案制定、现场拍摄主导、把控整体画面质量、与客户沟通拍摄需求', color: 'bg-blue-500' },
@@ -123,6 +124,7 @@ export default function StudioWorkflowManager() {
   const [albumCompletions, setAlbumCompletions] = useState({});
   const [trash, setTrash] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState(null);
   
   const [showAddRole, setShowAddRole] = useState(false);
   const [editingRole, setEditingRole] = useState(null);
@@ -146,6 +148,7 @@ export default function StudioWorkflowManager() {
     let cancelled = false;
     api.bootstrap().then((data) => {
       if (cancelled) return;
+      setCurrentUser(data.user);
       setRoles(data.roles);
       setTasks(data.tasks);
       setProjects(data.projects);
@@ -595,7 +598,7 @@ export default function StudioWorkflowManager() {
                 <p className="text-xs text-slate-500">全流程任务管理 · {roles.length}个职位 · {projects.length}个项目</p>
               </div>
             </div>
-            <div className="flex items-center gap-4 text-sm">
+            <div className="flex items-center gap-3 text-sm">
               <div className="text-right">
                 <div className="text-slate-500 text-xs">今日进度</div>
                 <div className="font-semibold text-slate-900">{completedToday}/{todayTasks.length}</div>
@@ -603,7 +606,7 @@ export default function StudioWorkflowManager() {
               <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center relative">
                 <svg className="w-12 h-12 transform -rotate-90 absolute">
                   <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="3" fill="none" className="text-slate-200" />
-                  <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="3" fill="none" 
+                  <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="3" fill="none"
                     strokeDasharray={`${todayTasks.length > 0 ? (completedToday/todayTasks.length) * 125.6 : 0} 125.6`}
                     className="text-emerald-500 transition-all" />
                 </svg>
@@ -611,6 +614,21 @@ export default function StudioWorkflowManager() {
                   {todayTasks.length > 0 ? Math.round((completedToday/todayTasks.length) * 100) : 0}%
                 </span>
               </div>
+              {currentUser && (
+                <div className="border-l border-slate-200 pl-3 flex items-center gap-2">
+                  <div className="text-right max-w-[140px]">
+                    <div className="text-xs text-slate-500 truncate">{currentUser.role === 'owner' ? 'Owner' : 'Assistant'}</div>
+                    <div className="text-xs font-medium text-slate-700 truncate" title={currentUser.email}>{currentUser.email}</div>
+                  </div>
+                  <a
+                    href="/cdn-cgi/access/logout"
+                    className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"
+                    title="退出登录"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </a>
+                </div>
+              )}
             </div>
           </div>
 
@@ -621,6 +639,7 @@ export default function StudioWorkflowManager() {
               { id: 'roles', label: '职位职责', icon: Users },
               { id: 'stats', label: '进度统计', icon: BarChart3 },
               { id: 'trash', label: '回收站', icon: Archive, badge: trash.length },
+              ...(currentUser?.role === 'owner' ? [{ id: 'users', label: '团队', icon: UserCog }] : []),
             ].map(tab => {
               const Icon = tab.icon;
               return (
@@ -961,9 +980,11 @@ export default function StudioWorkflowManager() {
                                         {!isLinked && isToday && !isCompleted && <span className="text-blue-600 font-medium">· 今日</span>}
                                       </div>
                                     </div>
-                                    <button onClick={(e) => { e.stopPropagation(); splitTask(t); }} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="AI拆分">
-                                      <Sparkles className="w-3.5 h-3.5" />
-                                    </button>
+                                    {import.meta.env.DEV && (
+                                      <button onClick={(e) => { e.stopPropagation(); splitTask(t); }} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="AI拆分">
+                                        <Sparkles className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
                                     {!isLinked && (
                                       <>
                                         <button onClick={(e) => { e.stopPropagation(); setEditingTask(t); }} className="p-1.5 hover:bg-slate-100 rounded text-slate-500" title="编辑">
@@ -1058,6 +1079,10 @@ export default function StudioWorkflowManager() {
               </div>
             </div>
           </div>
+        )}
+
+        {activeTab === 'users' && currentUser?.role === 'owner' && (
+          <UsersView roles={roles} currentEmail={currentUser.email} />
         )}
       </div>
 

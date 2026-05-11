@@ -93,7 +93,7 @@ export default function ProjectCard({ project, tasks, completions, updateComplet
                       {isToday && !isCompleted && <span className="text-blue-600 font-medium">· 今日</span>}
                     </div>
                   </div>
-                  {onSplit && (
+                  {import.meta.env.DEV && onSplit && (
                     <button onClick={(e) => { e.stopPropagation(); onSplit({ ...t, name: `${t.name} - ${project.clientName}${project.shootType}` }); }}
                       className="p-1.5 hover:bg-slate-100 rounded text-slate-600"><Sparkles className="w-3.5 h-3.5" /></button>
                   )}

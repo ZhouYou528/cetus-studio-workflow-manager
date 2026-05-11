@@ -54,8 +54,11 @@ export type TrashItem = {
   itemData: unknown; relatedData: unknown; deletedAt: number; deletedBy: string | null;
 };
 export type User = {
-  email: string; name: string | null;
-  role: 'owner' | 'assistant'; assignedRoles: string[];
+  email: string;
+  name: string | null;
+  role: 'owner' | 'assistant';
+  assignedRoles: string[];
+  createdAt?: number; // 仅 GET /api/users 返回
 };
 export type Bootstrap = {
   user: User;
@@ -85,6 +88,11 @@ function localDateParams(): string {
 export const api = {
   bootstrap: () => call<Bootstrap>('GET', `/api/bootstrap?${localDateParams()}`),
   me: () => call<User>('GET', '/api/me'),
+
+  // users(owner only)
+  listUsers: () => call<{ users: User[] }>('GET', '/api/users'),
+  updateUser: (email: string, body: Partial<Pick<User, 'role' | 'assignedRoles' | 'name'>>) =>
+    call<User>('PATCH', `/api/users/${encodeURIComponent(email)}`, body),
 
   // roles
   createRole: (body: Partial<Role>) => call<Role>('POST', '/api/roles', body),

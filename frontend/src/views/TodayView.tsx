@@ -92,9 +92,11 @@ export default function TodayView({
             {task.duration != null && task.duration !== '' && <span>· {task.duration}分钟</span>}
           </div>
         </div>
-        <button onClick={() => splitTask(task)} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="AI拆分">
-          <Sparkles className="w-3.5 h-3.5" />
-        </button>
+        {import.meta.env.DEV && (
+          <button onClick={() => splitTask(task)} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="AI拆分">
+            <Sparkles className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
     );
   };

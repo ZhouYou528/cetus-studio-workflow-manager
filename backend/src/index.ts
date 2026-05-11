@@ -10,7 +10,8 @@ import trashRoute from './routes/trash';
 import bootstrapRoute from './routes/bootstrap';
 
 export type Bindings = {
-  DEV_USER_EMAIL: string;
+  // 仅本地 .dev.vars 中存在;线上不设,Worker 拿不到 Access header 时直接 401。
+  DEV_USER_EMAIL?: string;
   OWNER_EMAILS: string;
   DB: D1Database;
 };

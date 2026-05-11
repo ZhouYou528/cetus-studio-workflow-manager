@@ -166,9 +166,11 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                           )}
                         </div>
                         <div className="flex gap-1 shrink-0">
-                          <button onClick={() => splitTask(t)} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="AI拆分">
-                            <Sparkles className="w-3.5 h-3.5" />
-                          </button>
+                          {import.meta.env.DEV && (
+                            <button onClick={() => splitTask(t)} className="p-1.5 hover:bg-slate-100 rounded text-slate-600" title="AI拆分">
+                              <Sparkles className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                           <button onClick={() => onEdit(t)} className="p-1.5 hover:bg-slate-100 rounded text-slate-500" title="编辑">
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>

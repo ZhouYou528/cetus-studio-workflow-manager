@@ -1,22 +1,21 @@
-# Cloudflare Workers 配置。Phase 2 加上 D1 绑定后,本地 `wrangler dev`
-# 会自动起一个 SQLite 镜像存在 .wrangler/state/v3/d1/ 下,部署时再切到云端。
+# Cloudflare Workers 配置。
 
 name = "studio-workflow-manager-api"
 main = "src/index.ts"
 compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
 
-# 本地开发时,Access 不生效拿不到邮箱 header。auth.ts 会回退到这个值。
-# OWNER_EMAILS:逗号分隔。任何此名单中的邮箱首次登录时自动 role='owner',
-# 其他邮箱默认 'assistant',需要 owner 在 /api/users/:email PATCH 升级。
+# 全局变量(线上生效)。安全注意:
+#   - DEV_USER_EMAIL 已**移出 wrangler.toml**,放在 .dev.vars(gitignored)中,只本地生效。
+#     prod 没这个 var → auth.ts 拿不到 Access header 时返回 401,不会被人裸 URL 访问。
+#   - OWNER_EMAILS 不是机密(只是允许 owner 角色的邮箱列表),留在这里没问题。
 [vars]
-DEV_USER_EMAIL = "shirleyljychina@gmail.com"
 OWNER_EMAILS = "shirleyljychina@gmail.com"
 
 # D1 数据库绑定
-# 本地:wrangler 会在 .wrangler/state/v3/d1/ 自动建一个 SQLite 文件,database_id 写啥都行
-# 线上:Phase 8 部署前跑 `wrangler d1 create studio_db`,把它返回的真实 UUID 填到 database_id
+# 本地:wrangler 在 .wrangler/state/v3/d1/ 自动建 SQLite,database_id 是占位符。
+# 线上:部署前跑 `wrangler d1 create studio_db`,把返回的真 UUID 填到 database_id。
 [[d1_databases]]
 binding = "DB"
 database_name = "studio_db"
-database_id = "local-placeholder"
+database_id = "55240b34-7bc1-4fd9-bf12-30c0e4af8dc3"

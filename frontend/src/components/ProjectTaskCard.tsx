@@ -66,10 +66,12 @@ export default function ProjectTaskCard({ task, roles, isOverdue, isCompleted, o
             <span className="font-medium text-slate-700">{contextLabel}</span><span>·</span><span>{timingLabel}</span><span>·</span><span>{dateLabel}</span>
           </div>
         </div>
-        <button onClick={() => onSplit({ ...task, name: task.name + ` (${isAlbum ? task.album?.clientName : task.project?.clientName})` })}
-          className="p-2 hover:bg-white rounded-lg text-slate-600">
-          <Sparkles className="w-4 h-4" />
-        </button>
+        {import.meta.env.DEV && (
+          <button onClick={() => onSplit({ ...task, name: task.name + ` (${isAlbum ? task.album?.clientName : task.project?.clientName})` })}
+            className="p-2 hover:bg-white rounded-lg text-slate-600">
+            <Sparkles className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </div>
   );

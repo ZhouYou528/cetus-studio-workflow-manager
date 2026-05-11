@@ -1,0 +1,15 @@
+# Cloudflare Pages 配置 — 让 wrangler pages deploy 时自动接上服务绑定。
+#
+# `pages_build_output_dir` 指向 vite 构建产物;部署时 wrangler 把这个目录的内容
+# 推到 Pages 边缘节点。
+#
+# `[[services]]` 让 Pages Functions 可以通过 env.BACKEND.fetch 调用 Worker,
+# Cloudflare 内部 RPC,不经外部 HTTP,Cf-Access-* header 完整保留。
+
+name = "studio-workflow-manager"
+pages_build_output_dir = "./dist"
+compatibility_date = "2025-01-15"
+
+[[services]]
+binding = "BACKEND"
+service = "studio-workflow-manager-api"

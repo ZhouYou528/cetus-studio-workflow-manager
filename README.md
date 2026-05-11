@@ -111,8 +111,8 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 - [x] **Phase 5**:前端数据层切到 API — `lib/api.ts` typed 封装;9 个 `updateXxx` 内部改 diff + API(签名不变);`useEffect` → `api.bootstrap()` 一次拉全部;completionKey 分隔符 `_` → `|`;删 `storage-shim.ts`
 - [x] **Phase 6a**:Phase 5 技术债修复 — 6 处 `startsWith` 残留分隔符;级联删除走 `setXxx` 消除 404 噪音;时区:前端按本地 TZ 拼 `?date=&dow=&dom=` 传给后端,服务器默认 UTC 兜底;DELETE 路由返回 `trashId` 让删除后立刻能恢复
 - [x] **Phase 6b**:拆组件 + 加类型 — 主文件 2050 → 1122 行;抽出 6 个 Modal/Dialog、3 个 Card、3 个 View 到独立文件;每个组件加 props 类型;共享类型在 `lib/types.ts`
-- [ ] **Phase 7**:GitHub 私有仓库(已建好仓库,持续 push)
-- [ ] **Phase 8**:Cloudflare Pages + Workers 部署 + Access 配置
+- [x] **Phase 7**:GitHub 私有仓库,持续 push
+- [x] **Phase 8**:Cloudflare 部署 — 远程 D1 + Worker + Pages + 服务绑定 + Cloudflare Access(邮箱 OTP 登录,team domain `cetus-studio.cloudflareaccess.com`)+ Users 管理 tab(owner 给队友分配 assignedRoles)+ 顶栏 Sign Out 按钮
 
 ---
 
@@ -152,6 +152,36 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 
 **同域部署**
 线上前后端共用一个域名 `studio.xxx.com`:Pages 托管前端,通过 Pages Functions 把 `/api/*` 路由给 Worker。本地用 Vite 的 proxy 模拟同域行为。
+
+---
+
+## 线上 URL(Phase 8)
+
+| 资源 | URL | 状态 |
+|---|---|---|
+| 前端 Pages | https://studio-workflow-manager.pages.dev | ✅ 上线(待 Access 接管) |
+| 后端 Worker | https://studio-workflow-manager-api.zy420806143.workers.dev | ✅ 部署,无 Access header 401 |
+| 远程 D1 | `studio_db` (UUID `55240b34-7bc1-4fd9-bf12-30c0e4af8dc3`,WNAM 区域) | ✅ 10 职位 + 36 默认任务 |
+| Cloudflare Access | team domain `cetus-studio.cloudflareaccess.com`,Policy `Owners only` | ✅ 拦在 Pages 前面 |
+
+**部署命令**(以后改动 push 上线):
+```bash
+# 后端
+cd backend && npm run deploy
+
+# 前端
+cd frontend && npm run build && npx wrangler pages deploy dist --project-name=studio-workflow-manager --commit-dirty=true
+```
+
+**远程 D1 改表**(schema 改了之后):
+```bash
+cd backend && npm run db:apply:remote
+```
+
+**邀请新队友:**
+1. Cloudflare Zero Trust → Access controls → Applications → 这个 app → Policies → 添加他们邮箱
+2. 队友访问 https://studio-workflow-manager.pages.dev → 收 OTP 登录
+3. 你打开「团队」tab(右上 owner-only),刷新 → 看到新成员 → 点编辑 → 勾选他能管的职位 → 保存
 
 ---
 
