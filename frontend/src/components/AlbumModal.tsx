@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
+import type { Attachment } from '../lib/api';
 import { useT } from '../lib/i18n';
 import type { Album } from '../lib/types';
+import AttachmentsSection from './AttachmentsSection';
 
 const ALBUM_TYPE_OPTIONS = [
   { value: '婚礼相册',    labelKey: 'album_type_wedding'       as const },
@@ -21,11 +23,14 @@ type AlbumPatch = {
 
 type Props = {
   album: Album | null;
+  parentId?: string | null;
+  attachments?: Attachment[];
+  onAttachmentsChange?: (items: Attachment[]) => void;
   onClose: () => void;
   onSave: (patch: AlbumPatch) => void;
 };
 
-export default function AlbumModal({ album, onClose, onSave }: Props) {
+export default function AlbumModal({ album, parentId, attachments, onAttachmentsChange, onClose, onSave }: Props) {
   const t = useT();
   const [clientName, setClientName] = useState(album?.clientName || '');
   const [albumType, setAlbumType] = useState(album?.albumType || ALBUM_TYPE_OPTIONS[0].value);
@@ -58,6 +63,7 @@ export default function AlbumModal({ album, onClose, onSave }: Props) {
             <label className="text-sm font-medium text-slate-700 dark:text-slate-300">{t('project_notes')}</label>
             <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="w-full mt-1 px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg text-sm resize-none" />
           </div>
+          <AttachmentsSection parentType="album" parentId={parentId ?? null} initial={attachments} onChange={onAttachmentsChange} />
         </div>
         <div className="flex gap-2 mt-5">
           <button onClick={onClose} className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">{t('cancel')}</button>

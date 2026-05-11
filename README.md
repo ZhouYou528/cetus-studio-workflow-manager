@@ -147,6 +147,22 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 **时区**
 - Worker 永远跑 UTC。前端 `localDateParams()` 拼出本地 TZ 的 `date=YYYY-MM-DD&dow=N&dom=N` 传给 bootstrap / tasks/today / tasks/weekly,后端识别这些参数后用它们,缺省时 fallback UTC
 
+**任务行细节展示**
+- 任务行的右侧加 `📎 N` 小徽章(只在有附件时显示)
+- 任务行下方追加一行 `text-xs line-clamp-2` 显示 description 预览
+- 3 处任务渲染:TodayView 日常任务、WeeklyView 周任务、职位职责 tab 任务清单
+- 主文件 `useMemo` 算 `taskAttachmentCounts` map,自动跟着 attachments 状态变化
+
+**附件功能(任务/项目/相册)**
+- 存储:**Cloudflare R2** 桶 `studio-attachments`(免费 10 GB,零出站流量费),桶私有所有读写经 Worker
+- D1 `attachments` 表 polymorphic(`parent_type` ∈ task/project/album),`r2_key` 是桶内对象键
+- 后端:`POST/GET/DELETE /api/attachments/:type/:id` + `GET /api/attachments/:id/download`(Worker 流式返回,带 RFC 5987 中文文件名)
+- 限制:**单文件 ≤ 25 MB**;**每父实体 ≤ 20 个**;MIME 白名单(images + PDF + Office + txt/csv/json/zip)
+- 权限:task 按 assignedRoles;project/album 任何登录用户可访问
+- 前端:`AttachmentsSection` 通用组件(拖拽 + 点击 + 多文件 + 实时进度)嵌入 Task/Project/Album 三个 Modal
+- 新建场景禁用上传,提示"保存后才能添加附件"
+- bootstrap 同时返回所有 attachments,Modal 不需要额外 fetch
+
 **手机端响应式**
 - 顶栏在 `< sm`(< 640px,即手机宽度)自动简化:隐藏副标题 / 隐藏「今日进度 0/3」文本(只留进度环)/ 邮箱用户区折叠成头像式圆形按钮(点击改名)/ 内边距和字体整体缩小
 - Tab 栏在窄屏自动横向滚动,字号/padding 缩小

@@ -8,12 +8,14 @@ import projectsRoute from './routes/projects';
 import albumsRoute from './routes/albums';
 import trashRoute from './routes/trash';
 import bootstrapRoute from './routes/bootstrap';
+import attachmentsRoute from './routes/attachments';
 
 export type Bindings = {
   // 仅本地 .dev.vars 中存在;线上不设,Worker 拿不到 Access header 时直接 401。
   DEV_USER_EMAIL?: string;
   OWNER_EMAILS: string;
   DB: D1Database;
+  BUCKET: R2Bucket;
 };
 
 export type AppVars = { user: AuthUser };
@@ -35,6 +37,7 @@ app.route('/api/projects', projectsRoute);
 app.route('/api/albums', albumsRoute);
 app.route('/api/trash', trashRoute);
 app.route('/api/bootstrap', bootstrapRoute);
+app.route('/api/attachments', attachmentsRoute);
 
 // 兼容老路径 /api/me → /api/users/me(前端原 Artifact 用的是 /api/me)
 app.get('/api/me', (c) => c.json(c.var.user));

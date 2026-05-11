@@ -1,4 +1,4 @@
-import { CalendarDays, Check, Edit2, Sparkles, Trash2 } from 'lucide-react';
+import { CalendarDays, Check, Edit2, Paperclip, Sparkles, Trash2 } from 'lucide-react';
 import { useT } from '../lib/i18n';
 import type { Role, Task } from '../lib/types';
 
@@ -11,9 +11,10 @@ type Props = {
   splitTask: (t: Task) => void;
   onEdit: (t: Task) => void;
   onDelete: (t: Task) => void;
+  taskAttachmentCounts?: Record<string, number>;
 };
 
-export default function WeeklyView({ tasks, roles, completions, todayKey, updateCompletions, splitTask, onEdit, onDelete }: Props) {
+export default function WeeklyView({ tasks, roles, completions, todayKey, updateCompletions, splitTask, onEdit, onDelete, taskAttachmentCounts }: Props) {
   const t = useT();
   const weeklyTasks = tasks.filter(x => x.isWeekly);
 
@@ -137,9 +138,10 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                     const completionKey = `${x.id}|${todayKey}`;
                     const isCompleted = !!completions[completionKey];
                     const priority = getPriorityFromDescription(x.description);
+                    const attCount = taskAttachmentCounts?.[x.id] ?? 0;
 
                     return (
-                      <div key={x.id} className={`p-3 flex items-start gap-3 transition ${isCompleted ? 'bg-emerald-50/40' : ''}`}>
+                      <div key={x.id} className={`p-3 flex items-start gap-3 transition ${isCompleted ? 'bg-emerald-50/40 dark:bg-emerald-950/20' : ''}`}>
                         <button
                           onClick={() => updateCompletions({ ...completions, [completionKey]: !isCompleted })}
                           className={`w-5 h-5 mt-0.5 rounded-full border-2 flex items-center justify-center shrink-0 transition ${
@@ -149,8 +151,15 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                           {isCompleted && <Check className="w-3 h-3 text-white" />}
                         </button>
                         <div className="flex-1 min-w-0">
-                          <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-900 dark:text-slate-100'}`}>
-                            {x.name}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-900 dark:text-slate-100'}`}>
+                              {x.name}
+                            </div>
+                            {attCount > 0 && (
+                              <span className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded inline-flex items-center gap-0.5">
+                                <Paperclip className="w-3 h-3" />{attCount}
+                              </span>
+                            )}
                           </div>
                           <div className="flex items-center gap-2 mt-1.5 flex-wrap text-xs">
                             {priority && (

@@ -1,4 +1,4 @@
-import { AlertCircle, Check, CheckCircle2, Clock, ListTodo, Sparkles } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, Clock, ListTodo, Paperclip, Sparkles } from 'lucide-react';
 import ProjectTaskCard from '../components/ProjectTaskCard';
 import { useT } from '../lib/i18n';
 import { useLocale } from '../lib/prefs';
@@ -27,6 +27,7 @@ type Props = {
   updateProjectCompletions: (next: Record<string, unknown>) => void;
   albumCompletions: Record<string, unknown>;
   updateAlbumCompletions: (next: Record<string, unknown>) => void;
+  taskAttachmentCounts?: Record<string, number>;
 };
 
 // 时段元数据用 i18n key 表示标签和描述(渲染时再调 t());颜色/角色 ID 保留为 const。
@@ -40,6 +41,7 @@ const TIME_SLOTS = [
 export default function TodayView({
   todayTasks, roles, completions, todayKey, updateCompletions, splitTask,
   projectTasks, projectCompletions, updateProjectCompletions, albumCompletions, updateAlbumCompletions,
+  taskAttachmentCounts,
 }: Props) {
   const t = useT();
   const [locale] = useLocale();
@@ -80,22 +82,33 @@ export default function TodayView({
     const isLinked = task.frequency === '项目联动';
     const completionKey = isLinked ? (task.completionKey as string) : `${task.id}|${todayKey}`;
     const isCompleted = !!completions[completionKey];
+    const attCount = taskAttachmentCounts?.[task.id] ?? 0;
     return (
-      <div key={task.id} className={`bg-white dark:bg-slate-900 rounded-xl border p-3 flex items-center gap-3 transition ${
+      <div key={task.id} className={`bg-white dark:bg-slate-900 rounded-xl border p-3 flex items-start gap-3 transition ${
         isCompleted ? 'border-emerald-200 bg-emerald-50/30' : isLinked ? 'border-rose-200' : 'border-slate-200 dark:border-slate-700'
       }`}>
         <button onClick={() => updateCompletions({ ...completions, [completionKey]: !isCompleted })}
-          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 dark:border-slate-600 hover:border-slate-500'}`}>
+          className={`w-5 h-5 mt-0.5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 dark:border-slate-600 hover:border-slate-500'}`}>
           {isCompleted && <Check className="w-3 h-3 text-white" />}
         </button>
-        <div className={`w-7 h-7 rounded-lg ${role?.color || 'bg-slate-400'} flex items-center justify-center text-sm shrink-0`}>{role?.icon}</div>
+        <div className={`w-7 h-7 rounded-lg ${role?.color || 'bg-slate-400'} flex items-center justify-center text-sm shrink-0 mt-0.5`}>{role?.icon}</div>
         <div className="flex-1 min-w-0">
-          <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-900 dark:text-slate-100'} truncate`}>{task.name}</div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-900 dark:text-slate-100'} truncate`}>{task.name}</div>
+            {attCount > 0 && (
+              <span className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded inline-flex items-center gap-0.5">
+                <Paperclip className="w-3 h-3" />{attCount}
+              </span>
+            )}
+          </div>
           <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
             <span>{role?.name}</span>
             {isLinked ? <span className="px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded font-medium text-xs">{t('project_linked')}</span> : <span>· {task.frequency}</span>}
             {task.duration != null && task.duration !== '' && <span>· {task.duration}{t('minutes')}</span>}
           </div>
+          {task.description && (
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">{task.description}</p>
+          )}
         </div>
         {import.meta.env.DEV && (
           <button onClick={() => splitTask(task)} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-600 dark:text-slate-400" title={t('ai_split')}>

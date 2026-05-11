@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
+import type { Attachment } from '../lib/api';
 import { useT } from '../lib/i18n';
 import type { Frequency, Role, Task } from '../lib/types';
+import AttachmentsSection from './AttachmentsSection';
 
 type TaskPatch = {
   name: string;
@@ -15,11 +17,14 @@ type Props = {
   task: Task | null;
   roles: Role[];
   defaultRoleId?: string;
+  parentId?: string | null;
+  attachments?: Attachment[];
+  onAttachmentsChange?: (items: Attachment[]) => void;
   onClose: () => void;
   onSave: (patch: TaskPatch) => void;
 };
 
-export default function TaskModal({ task, roles, defaultRoleId, onClose, onSave }: Props) {
+export default function TaskModal({ task, roles, defaultRoleId, parentId, attachments, onAttachmentsChange, onClose, onSave }: Props) {
   const t = useT();
   const [name, setName] = useState(task?.name || '');
   const [roleId, setRoleId] = useState(task?.roleId || defaultRoleId || roles[0]?.id || '');
@@ -65,6 +70,7 @@ export default function TaskModal({ task, roles, defaultRoleId, onClose, onSave 
             <label className="text-sm font-medium text-slate-700 dark:text-slate-300">{t('description_field')}</label>
             <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} className="w-full mt-1 px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg text-sm resize-none" />
           </div>
+          <AttachmentsSection parentType="task" parentId={parentId ?? null} initial={attachments} onChange={onAttachmentsChange} />
         </div>
         <div className="flex gap-2 mt-5">
           <button onClick={onClose} className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">{t('cancel')}</button>

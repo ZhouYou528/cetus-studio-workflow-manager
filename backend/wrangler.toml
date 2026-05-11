@@ -19,3 +19,9 @@ OWNER_EMAILS = "shirleyljychina@gmail.com"
 binding = "DB"
 database_name = "studio_db"
 database_id = "55240b34-7bc1-4fd9-bf12-30c0e4af8dc3"
+
+# R2 桶:任务/项目/相册的文件附件存这里
+# 桶私有,所有读写都通过 Worker(env.BUCKET)鉴权 + 代理
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "studio-attachments"

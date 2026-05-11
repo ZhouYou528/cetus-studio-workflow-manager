@@ -102,6 +102,22 @@ CREATE TABLE IF NOT EXISTS album_completions (
   FOREIGN KEY (album_id) REFERENCES album_designs(id)
 );
 
+-- ── 附件 ────────────────────────────────────────────
+-- 单表 polymorphic:一个 attachment 可挂在 task / project / album 上。
+-- 文件本身存在 R2(env.BUCKET),这里只存元数据。r2_key 是桶内的对象键。
+-- 删除父实体时由路由层 cascade 清理(物理删父 → 同时清 R2 + 此表;trash 软删时保留)。
+CREATE TABLE IF NOT EXISTS attachments (
+  id           TEXT PRIMARY KEY,
+  parent_type  TEXT NOT NULL,              -- 'task' / 'project' / 'album'
+  parent_id    TEXT NOT NULL,
+  r2_key       TEXT NOT NULL,              -- '<type>s/<parent_id>/<att_id>-<filename>'
+  filename     TEXT NOT NULL,              -- 用户上传时的原文件名
+  content_type TEXT,                       -- MIME
+  size_bytes   INTEGER NOT NULL,
+  uploaded_at  INTEGER NOT NULL,
+  uploaded_by  TEXT                        -- email
+);
+
 -- ── 回收站(30 天恢复期) ──────────────────────────
 -- type: 'task' / 'project' / 'album' / 'role'
 -- item_data: 被删项目的完整 JSON(恢复时直接 INSERT 回原表)
@@ -123,3 +139,4 @@ CREATE INDEX IF NOT EXISTS idx_projects_date      ON projects(shoot_date);
 CREATE INDEX IF NOT EXISTS idx_albums_start       ON album_designs(start_date);
 CREATE INDEX IF NOT EXISTS idx_trash_deleted      ON trash(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_proj_compl_project ON project_completions(project_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_parent ON attachments(parent_type, parent_id);

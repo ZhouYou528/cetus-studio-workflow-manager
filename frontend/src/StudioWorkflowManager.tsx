@@ -2,7 +2,7 @@
 // 但组件代码仍保持 JS 风格;Phase 6 拆组件 + 加类型时移除此 pragma。
 import React, { useState, useEffect } from 'react';
 import { api, ApiError } from './lib/api';
-import { Camera, Users, ListTodo, Bell, BarChart3, Plus, Edit2, Trash2, Check, X, ChevronDown, ChevronRight, Clock, AlertCircle, CheckCircle2, Calendar, Briefcase, Sparkles, Loader2, FolderOpen, MapPin, User, CalendarDays, Archive, LogOut, UserCog } from 'lucide-react';
+import { Camera, Users, ListTodo, Bell, BarChart3, Plus, Edit2, Trash2, Check, X, ChevronDown, ChevronRight, Clock, AlertCircle, CheckCircle2, Calendar, Briefcase, Sparkles, Loader2, FolderOpen, MapPin, User, CalendarDays, Archive, LogOut, UserCog, Paperclip } from 'lucide-react';
 import ConfirmDialog from './components/ConfirmDialog';
 import RoleModal from './components/RoleModal';
 import TaskModal from './components/TaskModal';
@@ -127,7 +127,17 @@ export default function StudioWorkflowManager() {
   const [albumDesigns, setAlbumDesigns] = useState([]);
   const [albumCompletions, setAlbumCompletions] = useState({});
   const [trash, setTrash] = useState([]);
+  const [attachments, setAttachments] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // 每个任务的附件数量,供任务行右侧显示 📎 N 徽章
+  const taskAttachmentCounts = React.useMemo(() => {
+    const map = {};
+    attachments.forEach(a => {
+      if (a.parentType === 'task') map[a.parentId] = (map[a.parentId] ?? 0) + 1;
+    });
+    return map;
+  }, [attachments]);
   const [currentUser, setCurrentUser] = useState(null);
   
   const [showAddRole, setShowAddRole] = useState(false);
@@ -162,6 +172,7 @@ export default function StudioWorkflowManager() {
       setProjectCompletions(data.projectCompletions);
       setAlbumCompletions(data.albumCompletions);
       setTrash(data.trash.map(normalizeTrashItem));
+      setAttachments(data.attachments || []);
       setLoading(false);
     }).catch((e) => {
       console.error('Bootstrap error:', e);
@@ -689,12 +700,13 @@ export default function StudioWorkflowManager() {
 
       <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
         {activeTab === 'today' && (
-          <TodayView 
+          <TodayView
             todayTasks={todayTasks} roles={roles} completions={completions} todayKey={todayKey}
             updateCompletions={updateCompletions} splitTask={splitTask}
             projectTasks={getTodayProjectTasks()} projectCompletions={projectCompletions}
             updateProjectCompletions={updateProjectCompletions}
             albumCompletions={albumCompletions} updateAlbumCompletions={updateAlbumCompletions}
+            taskAttachmentCounts={taskAttachmentCounts}
           />
         )}
 
@@ -702,6 +714,7 @@ export default function StudioWorkflowManager() {
           <WeeklyView
             tasks={tasks} roles={roles} completions={completions} todayKey={todayKey}
             updateCompletions={updateCompletions} splitTask={splitTask}
+            taskAttachmentCounts={taskAttachmentCounts}
             onEdit={setEditingTask}
             onDelete={(task) => {
               setConfirmDialog({
@@ -983,18 +996,26 @@ export default function StudioWorkflowManager() {
                                 const isLinked = t.frequency === '项目联动';
                                 const completionKey = isLinked ? t.completionKey : `${t.id}|${todayKey}`;
                                 const isCompleted = completions[completionKey];
-                                const isToday = isLinked || (t.frequency === '每日') || 
+                                const isToday = isLinked || (t.frequency === '每日') ||
                                   (t.frequency === '每周' && new Date().getDay() === (t.weekday ?? 1)) ||
                                   (t.frequency === '每月' && new Date().getDate() === (t.monthday ?? 1));
-                                
+                                const attCount = taskAttachmentCounts[t.id] ?? 0;
+
                                 return (
-                                  <div key={t.id} className={`bg-white dark:bg-slate-900 rounded-lg p-2.5 flex items-center gap-2.5 ${isLinked ? 'border border-rose-200 bg-rose-50/30' : (isToday && !isCompleted ? 'border border-blue-200' : '')}`}>
+                                  <div key={t.id} className={`bg-white dark:bg-slate-900 rounded-lg p-2.5 flex items-start gap-2.5 ${isLinked ? 'border border-rose-200 bg-rose-50/30' : (isToday && !isCompleted ? 'border border-blue-200' : '')}`}>
                                     <button onClick={(e) => { e.stopPropagation(); updateCompletions({ ...completions, [completionKey]: !isCompleted }); }}
-                                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                                      className={`w-5 h-5 mt-0.5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 dark:border-slate-600'}`}>
                                       {isCompleted && <Check className="w-3 h-3 text-white" />}
                                     </button>
                                     <div className="flex-1 min-w-0">
-                                      <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-800 dark:text-slate-200'} truncate`}>{t.name}</div>
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <div className={`text-sm font-medium ${isCompleted ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-800 dark:text-slate-200'} truncate`}>{t.name}</div>
+                                        {attCount > 0 && (
+                                          <span className="text-xs px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded inline-flex items-center gap-0.5">
+                                            <Paperclip className="w-3 h-3" />{attCount}
+                                          </span>
+                                        )}
+                                      </div>
                                       <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5 flex-wrap">
                                         {isLinked ? (
                                           <span className="px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded font-medium">{ti('project_linked')}</span>
@@ -1004,6 +1025,9 @@ export default function StudioWorkflowManager() {
                                         {t.duration && <span>{t.duration}{ti('minutes')}</span>}
                                         {!isLinked && isToday && !isCompleted && <span className="text-blue-600 font-medium">· {ti('today')}</span>}
                                       </div>
+                                      {t.description && (
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">{t.description}</p>
+                                      )}
                                     </div>
                                     {import.meta.env.DEV && (
                                       <button onClick={(e) => { e.stopPropagation(); splitTask(t); }} className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-600 dark:text-slate-400" title={ti('ai_split')}>
@@ -1145,6 +1169,16 @@ export default function StudioWorkflowManager() {
       {(showAddTask || editingTask) && (
         <TaskModal task={editingTask} roles={roles}
           defaultRoleId={typeof showAddTask === 'string' ? showAddTask : null}
+          parentId={editingTask?.id ?? null}
+          attachments={editingTask ? attachments.filter(a => a.parentType === 'task' && a.parentId === editingTask.id) : []}
+          onAttachmentsChange={(items) => {
+            if (!editingTask) return;
+            // 用新 items 替换该 parent 的所有附件
+            setAttachments(prev => [
+              ...prev.filter(a => !(a.parentType === 'task' && a.parentId === editingTask.id)),
+              ...items,
+            ]);
+          }}
           onClose={() => { setShowAddTask(false); setEditingTask(null); }}
           onSave={(taskData) => {
             if (editingTask) updateTasks(tasks.map(t => t.id === editingTask.id ? { ...t, ...taskData } : t));
@@ -1161,6 +1195,15 @@ export default function StudioWorkflowManager() {
       {(showAddProject || editingProject) && (
         <ProjectModal project={editingProject}
           defaultRoleId={typeof showAddProject === 'string' ? showAddProject : 'r1'}
+          parentId={editingProject?.id ?? null}
+          attachments={editingProject ? attachments.filter(a => a.parentType === 'project' && a.parentId === editingProject.id) : []}
+          onAttachmentsChange={(items) => {
+            if (!editingProject) return;
+            setAttachments(prev => [
+              ...prev.filter(a => !(a.parentType === 'project' && a.parentId === editingProject.id)),
+              ...items,
+            ]);
+          }}
           onClose={() => { setShowAddProject(false); setEditingProject(null); }}
           onSave={(projectData) => {
             if (editingProject) updateProjects(projects.map(p => p.id === editingProject.id ? { ...p, ...projectData } : p));
@@ -1171,6 +1214,15 @@ export default function StudioWorkflowManager() {
 
       {(showAddAlbum || editingAlbum) && (
         <AlbumModal album={editingAlbum}
+          parentId={editingAlbum?.id ?? null}
+          attachments={editingAlbum ? attachments.filter(a => a.parentType === 'album' && a.parentId === editingAlbum.id) : []}
+          onAttachmentsChange={(items) => {
+            if (!editingAlbum) return;
+            setAttachments(prev => [
+              ...prev.filter(a => !(a.parentType === 'album' && a.parentId === editingAlbum.id)),
+              ...items,
+            ]);
+          }}
           onClose={() => { setShowAddAlbum(false); setEditingAlbum(null); }}
           onSave={(albumData) => {
             if (editingAlbum) updateAlbumDesigns(albumDesigns.map(a => a.id === editingAlbum.id ? { ...a, ...albumData } : a));

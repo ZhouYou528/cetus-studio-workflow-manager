@@ -53,6 +53,17 @@ export type TrashItem = {
   id: string; type: 'task' | 'project' | 'album' | 'role';
   itemData: unknown; relatedData: unknown; deletedAt: number; deletedBy: string | null;
 };
+export type ParentType = 'task' | 'project' | 'album';
+export type Attachment = {
+  id: string;
+  parentType: ParentType;
+  parentId: string;
+  filename: string;
+  contentType: string | null;
+  sizeBytes: number;
+  uploadedAt: number;
+  uploadedBy: string | null;
+};
 export type User = {
   email: string;
   name: string | null;
@@ -71,6 +82,7 @@ export type Bootstrap = {
   completions: Record<string, number>;
   projectCompletions: Record<string, number>;
   albumCompletions: Record<string, number>;
+  attachments: Attachment[];
 };
 
 // 用户本地时区下的"今天"。后端 Worker 跑在 UTC,前端需要把本机的
@@ -136,4 +148,24 @@ export const api = {
   restoreTrash: (id: string) => call<{ ok: true }>('POST', `/api/trash/${id}/restore`),
   deleteTrash: (id: string) => call<{ ok: true }>('DELETE', `/api/trash/${id}`),
   emptyTrash: () => call<{ ok: true }>('DELETE', `/api/trash`),
+
+  // attachments
+  listAttachments: (type: ParentType, id: string) =>
+    call<{ items: Attachment[] }>('GET', `/api/attachments/${type}/${encodeURIComponent(id)}`),
+  uploadAttachment: async (type: ParentType, id: string, file: File): Promise<Attachment> => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`/api/attachments/${type}/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      credentials: 'include',
+      body: fd, // 不设 Content-Type,浏览器自动加 multipart boundary
+    });
+    const text = await res.text();
+    const parsed = text ? safeJson(text) : null;
+    if (!res.ok) throw new ApiError(res.status, parsed, `upload → ${res.status}`);
+    return parsed as Attachment;
+  },
+  deleteAttachment: (id: string) =>
+    call<{ ok: true }>('DELETE', `/api/attachments/${encodeURIComponent(id)}`),
+  attachmentDownloadUrl: (id: string) => `/api/attachments/${encodeURIComponent(id)}/download`,
 };

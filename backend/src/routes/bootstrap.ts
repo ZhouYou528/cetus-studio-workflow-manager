@@ -87,6 +87,38 @@ app.get('/', async (c) => {
     albumCompletions[`album|${r.albumId}|${r.taskTemplateId}`] = r.completedAt;
   }
 
+  // 附件:用 Map 按 parent 分组,前端按需读取
+  // 不做权限过滤(可见 parent 列表已过滤,因此查到的 attachments 自然只属于可见 parent)
+  // 注:任务对 assistant 已过滤,所以 attachments 表里那些 parent_type='task' 的也要按可见 task ids 过滤
+  const visibleTaskIds = (tasks as { id: string }[]).map((t) => t.id);
+  const visibleProjectIds = (projects as { id: string }[]).map((p) => p.id);
+  const visibleAlbumIds = (albumDesigns as { id: string }[]).map((a) => a.id);
+
+  type AttRow = { id: string; parentType: string; parentId: string; filename: string; contentType: string | null; sizeBytes: number; uploadedAt: number; uploadedBy: string | null };
+  let attachments: AttRow[] = [];
+  if (visibleTaskIds.length || visibleProjectIds.length || visibleAlbumIds.length) {
+    const clauses: string[] = [];
+    const binds: unknown[] = [];
+    if (visibleTaskIds.length) {
+      clauses.push(`(parent_type = 'task' AND parent_id IN (${visibleTaskIds.map(() => '?').join(',')}))`);
+      binds.push(...visibleTaskIds);
+    }
+    if (visibleProjectIds.length) {
+      clauses.push(`(parent_type = 'project' AND parent_id IN (${visibleProjectIds.map(() => '?').join(',')}))`);
+      binds.push(...visibleProjectIds);
+    }
+    if (visibleAlbumIds.length) {
+      clauses.push(`(parent_type = 'album' AND parent_id IN (${visibleAlbumIds.map(() => '?').join(',')}))`);
+      binds.push(...visibleAlbumIds);
+    }
+    attachments = await all<AttRow>(
+      c,
+      `SELECT id, parent_type, parent_id, filename, content_type, size_bytes, uploaded_at, uploaded_by
+       FROM attachments WHERE ${clauses.join(' OR ')} ORDER BY uploaded_at DESC`,
+      ...binds,
+    );
+  }
+
   return c.json({
     user,
     today: todayKey,
@@ -98,6 +130,7 @@ app.get('/', async (c) => {
     completions,
     projectCompletions,
     albumCompletions,
+    attachments,
   });
 });
 
