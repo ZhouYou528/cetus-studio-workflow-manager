@@ -7,6 +7,7 @@ import tasksRoute from './routes/tasks';
 import projectsRoute from './routes/projects';
 import albumsRoute from './routes/albums';
 import trashRoute from './routes/trash';
+import bootstrapRoute from './routes/bootstrap';
 
 export type Bindings = {
   DEV_USER_EMAIL: string;
@@ -32,6 +33,7 @@ app.route('/api/tasks', tasksRoute);
 app.route('/api/projects', projectsRoute);
 app.route('/api/albums', albumsRoute);
 app.route('/api/trash', trashRoute);
+app.route('/api/bootstrap', bootstrapRoute);
 
 // 兼容老路径 /api/me → /api/users/me(前端原 Artifact 用的是 /api/me)
 app.get('/api/me', (c) => c.json(c.var.user));

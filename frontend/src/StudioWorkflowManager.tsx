@@ -1,5 +1,7 @@
-// @ts-nocheck — Artifact 原始代码,Phase 5 切换 API 时整体重构并加类型,届时移除此 pragma。
+// @ts-nocheck — Artifact 原始 UI 代码。Phase 5 已把数据层从 window.storage 切到 API,
+// 但组件代码仍保持 JS 风格;Phase 6 拆组件 + 加类型时移除此 pragma。
 import React, { useState, useEffect } from 'react';
+import { api, ApiError } from './lib/api';
 import { Camera, Users, ListTodo, Bell, BarChart3, Plus, Edit2, Trash2, Check, X, ChevronDown, ChevronRight, Clock, AlertCircle, CheckCircle2, Calendar, Briefcase, Sparkles, Loader2, FolderOpen, MapPin, User, CalendarDays, Archive } from 'lucide-react';
 
 const DEFAULT_ROLES = [
@@ -127,155 +129,244 @@ export default function StudioWorkflowManager() {
   const [expandedAlbum, setExpandedAlbum] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null); // {title, message, onConfirm}
 
+  // ── 数据装载 ───────────────────────────────────────────
+  // 启动时 GET /api/bootstrap 一次拿全部应用状态。后续状态改动由 updateXxx 增量同步。
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const result = await window.storage.get(STORAGE_KEY);
-        if (result && result.value) {
-          const data = JSON.parse(result.value);
-          
-          // 迁移职位 - 强制确保所有默认职位存在
-          if (data.roles) {
-            let migratedRoles = data.roles.map(r => {
-              if (r.id === 'r1' || r.id === 'r2' || r.id === 'r3') return { ...r, supportsProjects: true };
-              if (r.id === 'r5') return { ...r, supportsProjects: false };
-              if (r.supportsProjects === undefined) return { ...r, supportsProjects: false };
-              return r;
-            });
-            DEFAULT_ROLES.forEach(defaultRole => {
-              if (!migratedRoles.some(r => r.id === defaultRole.id)) {
-                migratedRoles.push(defaultRole);
-              }
-            });
-            setRoles(migratedRoles);
-          } else {
-            setRoles(DEFAULT_ROLES);
-          }
-          
-          // 迁移任务
-          if (data.tasks) {
-            const oldProjectTaskIds = ['t_lead_2', 't_lead_3', 't_lead_4', 't_lead_5', 't_lead_6'];
-            let filtered = data.tasks.filter(t => 
-              !oldProjectTaskIds.includes(t.id) && t.frequency !== '项目制'
-            );
-            const newDefaultIds = ['t_cs_1', 't_cs_2', 't_cs_3', 't_cs_4', 't_cs_5', 't_mk_1', 't_mk_2', 't_mk_3', 't_mk_4', 't_promo_1', 't_promo_2', 't_promo_3', 't_promo_4', 't_promo_5', 't_promo_6', 't_fin_1', 't_fin_2', 't_fin_3', 't_fin_4', 't_fin_5', 't_fin_6', 't_fin_7', 't_fin_8', 't_week_1', 't_week_2', 't_week_3', 't_week_4', 't_week_5', 't_week_6', 't_week_7', 't_week_8', 't_week_9', 't_week_11', 't_week_12', 't_week_15'];
-            const existingIds = new Set(filtered.map(t => t.id));
-            const missingDefaults = DEFAULT_TASKS.filter(t => 
-              newDefaultIds.includes(t.id) && !existingIds.has(t.id)
-            );
-            filtered = [...filtered, ...missingDefaults];
-            setTasks(filtered);
-          } else {
-            setTasks(DEFAULT_TASKS);
-          }
-          
-          if (data.completions) setCompletions(data.completions);
-          if (data.reminders) setReminders(data.reminders);
-          if (data.projects) setProjects(data.projects);
-          if (data.projectCompletions) setProjectCompletions(data.projectCompletions);
-          if (data.albumDesigns) setAlbumDesigns(data.albumDesigns);
-          if (data.albumCompletions) setAlbumCompletions(data.albumCompletions);
-          if (data.trash && Array.isArray(data.trash)) {
-            const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
-            const cleanedTrash = data.trash.filter(item => item && item.deletedAt && item.deletedAt > thirtyDaysAgo);
-            setTrash(cleanedTrash);
-          }
-        }
-      } catch (e) {
-        console.error('Load error:', e);
-      }
+    let cancelled = false;
+    api.bootstrap().then((data) => {
+      if (cancelled) return;
+      setRoles(data.roles);
+      setTasks(data.tasks);
+      setProjects(data.projects);
+      setAlbumDesigns(data.albumDesigns);
+      setCompletions(data.completions);
+      setProjectCompletions(data.projectCompletions);
+      setAlbumCompletions(data.albumCompletions);
+      setTrash(data.trash.map(normalizeTrashItem));
       setLoading(false);
-    };
-    loadData();
+    }).catch((e) => {
+      console.error('Bootstrap error:', e);
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
   }, []);
 
-  const saveData = async (newData) => {
-    const data = {
-      roles: newData.roles ?? roles,
-      tasks: newData.tasks ?? tasks,
-      completions: newData.completions ?? completions,
-      reminders: newData.reminders ?? reminders,
-      projects: newData.projects ?? projects,
-      projectCompletions: newData.projectCompletions ?? projectCompletions,
-      albumDesigns: newData.albumDesigns ?? albumDesigns,
-      albumCompletions: newData.albumCompletions ?? albumCompletions,
-      trash: newData.trash ?? trash,
+  // ── diff 助手 + 错误吞噬 ───────────────────────────────
+  // 9 个 updateXxx 保持原签名(整数组/整对象传入),内部 diff 当前 state 与新值,
+  // 触发增/删/改 API。组件代码 1 行不动。
+  const diffArrays = (oldArr, newArr) => {
+    const oldMap = new Map(oldArr.map(x => [x.id, x]));
+    const newMap = new Map(newArr.map(x => [x.id, x]));
+    return {
+      added: newArr.filter(x => !oldMap.has(x.id)),
+      removed: oldArr.filter(x => !newMap.has(x.id)),
+      updated: newArr.filter(x => {
+        const old = oldMap.get(x.id);
+        return old && JSON.stringify(old) !== JSON.stringify(x);
+      }),
     };
-    try {
-      await window.storage.set(STORAGE_KEY, JSON.stringify(data));
-    } catch (e) {
-      console.error('Save failed:', e);
+  };
+  const diffObjects = (oldObj, newObj) => {
+    const allKeys = new Set([...Object.keys(oldObj || {}), ...Object.keys(newObj || {})]);
+    const added = [], removed = [];
+    for (const k of allKeys) {
+      const o = !!(oldObj || {})[k];
+      const n = !!(newObj || {})[k];
+      if (n && !o) added.push(k);
+      else if (o && !n) removed.push(k);
+    }
+    return { added, removed };
+  };
+  // 404 在级联删除场景里是预期(任务被删后,其完成记录也被清,客户端可能滞后再 fire uncomplete)。
+  // Phase 6 重构后可以更精准,Phase 5 先吞噬。
+  const swallow = (p) => p.catch(e => {
+    if (!(e instanceof ApiError) || e.status !== 404) console.error(e);
+  });
+
+  // ── 8 个标准 updateXxx ────────────────────────────────
+  const updateRoles = (newRoles) => {
+    const d = diffArrays(roles, newRoles);
+    setRoles(newRoles);
+    d.added.forEach(r => swallow(api.createRole(r)));
+    d.removed.forEach(r => swallow(api.deleteRole(r.id)));
+    d.updated.forEach(r => swallow(api.updateRole(r.id, r)));
+  };
+  const updateTasks = (newTasks) => {
+    const d = diffArrays(tasks, newTasks);
+    setTasks(newTasks);
+    d.added.forEach(t => swallow(api.createTask(t)));
+    d.removed.forEach(t => swallow(api.deleteTask(t.id)));
+    d.updated.forEach(t => swallow(api.updateTask(t.id, t)));
+  };
+  const updateProjects = (newP) => {
+    const d = diffArrays(projects, newP);
+    setProjects(newP);
+    d.added.forEach(p => swallow(api.createProject(p)));
+    d.removed.forEach(p => swallow(api.deleteProject(p.id)));
+    d.updated.forEach(p => swallow(api.updateProject(p.id, p)));
+  };
+  const updateAlbumDesigns = (newA) => {
+    const d = diffArrays(albumDesigns, newA);
+    setAlbumDesigns(newA);
+    d.added.forEach(a => swallow(api.createAlbum(a)));
+    d.removed.forEach(a => swallow(api.deleteAlbum(a.id)));
+    d.updated.forEach(a => swallow(api.updateAlbum(a.id, a)));
+  };
+
+  // ── 3 个 completion 字典 updateXxx ────────────────────
+  const updateCompletions = (newC) => {
+    const { added, removed } = diffObjects(completions, newC);
+    setCompletions(newC);
+    const today = new Date().toISOString().slice(0, 10);
+    const handle = (key, complete) => {
+      if (key.startsWith('linked|')) {
+        const [, tplId, pid] = key.split('|');
+        swallow(complete ? api.completeProjectTask(pid, tplId, 'r7') : api.uncompleteProjectTask(pid, tplId, 'r7'));
+      } else {
+        const idx = key.indexOf('|');
+        const taskId = idx >= 0 ? key.slice(0, idx) : key;
+        const date = idx >= 0 ? key.slice(idx + 1) : today;
+        swallow(complete ? api.completeTask(taskId, date) : api.uncompleteTask(taskId, date));
+      }
+    };
+    added.forEach(k => handle(k, true));
+    removed.forEach(k => handle(k, false));
+  };
+  const updateProjectCompletions = (newPC) => {
+    const { added, removed } = diffObjects(projectCompletions, newPC);
+    setProjectCompletions(newPC);
+    for (const k of added) {
+      const [pid, rid, tid] = k.split('|');
+      swallow(api.completeProjectTask(pid, tid, rid));
+    }
+    for (const k of removed) {
+      const [pid, rid, tid] = k.split('|');
+      swallow(api.uncompleteProjectTask(pid, tid, rid));
+    }
+  };
+  const updateAlbumCompletions = (newAC) => {
+    const { added, removed } = diffObjects(albumCompletions, newAC);
+    setAlbumCompletions(newAC);
+    for (const k of added) {
+      const [, aid, tid] = k.split('|');
+      swallow(api.completeAlbumTask(aid, tid));
+    }
+    for (const k of removed) {
+      const [, aid, tid] = k.split('|');
+      swallow(api.uncompleteAlbumTask(aid, tid));
     }
   };
 
-  const updateRoles = (newRoles) => { setRoles(newRoles); saveData({ roles: newRoles }); };
-  const updateTasks = (newTasks) => { setTasks(newTasks); saveData({ tasks: newTasks }); };
-  const updateCompletions = (newC) => { setCompletions(newC); saveData({ completions: newC }); };
-  const updateReminders = (newR) => { setReminders(newR); saveData({ reminders: newR }); };
-  const updateProjects = (newP) => { setProjects(newP); saveData({ projects: newP }); };
-  const updateProjectCompletions = (newPC) => { setProjectCompletions(newPC); saveData({ projectCompletions: newPC }); };
-  const updateAlbumDesigns = (newA) => { setAlbumDesigns(newA); saveData({ albumDesigns: newA }); };
-  const updateAlbumCompletions = (newAC) => { setAlbumCompletions(newAC); saveData({ albumCompletions: newAC }); };
-  const updateTrash = (newT) => { setTrash(newT); saveData({ trash: newT }); };
+  // ── trash 状态 + reminders 占位 ───────────────────────
+  // trash 的 API 调用走专门的 4 个处理函数(下面),updateTrash 仅负责本地 state。
+  const updateTrash = (newT) => setTrash(newT);
+  // reminders 当前未持久化(原 Artifact 也很少用);Phase 6+ 决定是否上服务器
+  const updateReminders = (newR) => setReminders(newR);
 
+  // ── 回收站操作 ─────────────────────────────────────────
+  // 后台 trash 项目由 api.deleteX 在服务器端创建;本地 moveToTrash 先乐观追加一条
+  // _local 占位,然后 1 秒后刷新 trash 拿真实 id。
+  const refreshTrash = async () => {
+    try {
+      const { items } = await api.listTrash();
+      setTrash(items.map(normalizeTrashItem));
+    } catch (e) {
+      console.error('refresh trash:', e);
+    }
+  };
   const moveToTrash = (type, item, relatedCompletions = {}) => {
-    const trashItem = {
-      id: `trash_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
-      type,
-      item,
+    const optimistic = {
+      id: `trash_local_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      type, item,
       relatedCompletions: relatedCompletions || {},
       deletedAt: Date.now(),
+      _local: true,
     };
-    updateTrash([trashItem, ...trash]);
+    setTrash([optimistic, ...trash]);
+    setTimeout(refreshTrash, 1000);
   };
 
-  const restoreFromTrash = (trashId) => {
+  const restoreFromTrash = async (trashId) => {
     const trashItem = trash.find(t => t.id === trashId);
     if (!trashItem) return;
-
+    if (trashItem._local) {
+      // 本会话刚删除的项目还没拿到真实 trash id,等刷新
+      await refreshTrash();
+      alert('正在与服务器同步,请稍后再试');
+      return;
+    }
     try {
-      if (trashItem.type === 'task') {
-        const exists = tasks.some(t => t.id === trashItem.item.id);
-        if (!exists) updateTasks([...tasks, trashItem.item]);
-        if (trashItem.relatedCompletions && Object.keys(trashItem.relatedCompletions).length > 0) {
-          updateCompletions({ ...completions, ...trashItem.relatedCompletions });
-        }
-      } else if (trashItem.type === 'project') {
-        const exists = projects.some(p => p.id === trashItem.item.id);
-        if (!exists) updateProjects([...projects, trashItem.item]);
-        if (trashItem.relatedCompletions && Object.keys(trashItem.relatedCompletions).length > 0) {
-          updateProjectCompletions({ ...projectCompletions, ...trashItem.relatedCompletions });
-        }
-      } else if (trashItem.type === 'album') {
-        const exists = albumDesigns.some(a => a.id === trashItem.item.id);
-        if (!exists) updateAlbumDesigns([...albumDesigns, trashItem.item]);
-        if (trashItem.relatedCompletions && Object.keys(trashItem.relatedCompletions).length > 0) {
-          updateAlbumCompletions({ ...albumCompletions, ...trashItem.relatedCompletions });
-        }
-      } else if (trashItem.type === 'role') {
-        const role = trashItem.item.role;
-        if (role && !roles.some(r => r.id === role.id)) {
-          updateRoles([...roles, role]);
-        }
-        if (trashItem.item.tasks && trashItem.item.tasks.length > 0) {
-          const newTasks = trashItem.item.tasks.filter(t => !tasks.some(x => x.id === t.id));
-          if (newTasks.length > 0) updateTasks([...tasks, ...newTasks]);
-        }
-      }
-      updateTrash(trash.filter(t => t.id !== trashId));
+      await api.restoreTrash(trashId);
     } catch (e) {
       console.error('Restore error:', e);
       alert('恢复失败,请重试');
+      return;
+    }
+    // 服务器已 INSERT 回原表 + 完成记录,这里只更新本地 state(不调 API)
+    setTrash(trash.filter(t => t.id !== trashId));
+    if (trashItem.type === 'task') {
+      if (!tasks.some(t => t.id === trashItem.item.id)) setTasks([...tasks, trashItem.item]);
+      if (trashItem.relatedCompletions) setCompletions({ ...completions, ...trashItem.relatedCompletions });
+    } else if (trashItem.type === 'project') {
+      if (!projects.some(p => p.id === trashItem.item.id)) setProjects([...projects, trashItem.item]);
+      if (trashItem.relatedCompletions) setProjectCompletions({ ...projectCompletions, ...trashItem.relatedCompletions });
+    } else if (trashItem.type === 'album') {
+      if (!albumDesigns.some(a => a.id === trashItem.item.id)) setAlbumDesigns([...albumDesigns, trashItem.item]);
+      if (trashItem.relatedCompletions) setAlbumCompletions({ ...albumCompletions, ...trashItem.relatedCompletions });
+    } else if (trashItem.type === 'role') {
+      const role = trashItem.item.role;
+      if (role && !roles.some(r => r.id === role.id)) setRoles([...roles, role]);
+      if (trashItem.item.tasks?.length) {
+        const newTasks = trashItem.item.tasks.filter(t => !tasks.some(x => x.id === t.id));
+        if (newTasks.length) setTasks([...tasks, ...newTasks]);
+      }
     }
   };
 
-  const permanentlyDelete = (trashId) => {
-    updateTrash(trash.filter(t => t.id !== trashId));
+  const permanentlyDelete = async (trashId) => {
+    const trashItem = trash.find(t => t.id === trashId);
+    if (!trashItem) return;
+    if (!trashItem._local) {
+      try { await api.deleteTrash(trashId); } catch (e) { console.error(e); }
+    }
+    setTrash(trash.filter(t => t.id !== trashId));
   };
 
-  const emptyTrash = () => {
-    updateTrash([]);
+  const emptyTrash = async () => {
+    try { await api.emptyTrash(); } catch (e) { console.error(e); }
+    setTrash([]);
   };
+
+  // 把后端 trash item 形状映射回原 Artifact 字段命名,让 TrashView 不用改
+  function normalizeTrashItem(t) {
+    const related = t.relatedData || null;
+    const relatedCompletions = {};
+    if (t.type === 'task' && related?.task_completions) {
+      for (const r of related.task_completions) {
+        relatedCompletions[`${r.taskId}|${r.completionDate}`] = r.completedAt;
+      }
+    } else if (t.type === 'project' && related?.project_completions) {
+      for (const r of related.project_completions) {
+        if (r.roleId === 'r7') {
+          // Marketing 联动恢复时进 completions(原前端约定),不是 projectCompletions
+          relatedCompletions[`linked|${r.taskTemplateId}|${r.projectId}`] = r.completedAt;
+        } else {
+          relatedCompletions[`${r.projectId}|${r.roleId}|${r.taskTemplateId}`] = r.completedAt;
+        }
+      }
+    } else if (t.type === 'album' && related?.album_completions) {
+      for (const r of related.album_completions) {
+        relatedCompletions[`album|${r.albumId}|${r.taskTemplateId}`] = r.completedAt;
+      }
+    }
+    return {
+      id: t.id,
+      type: t.type,
+      item: t.itemData,
+      relatedCompletions,
+      deletedAt: t.deletedAt,
+    };
+  }
 
   const getProjectTasks = (project, roleId) => {
     const targetRoleId = roleId || project.roleId || 'r1';
@@ -289,7 +380,7 @@ export default function StudioWorkflowManager() {
         roleId: targetRoleId,
         dueDate: dueDate.toISOString().split('T')[0],
         projectId: project.id,
-        completionKey: `${project.id}_${targetRoleId}_${t.id}`,
+        completionKey: `${project.id}|${targetRoleId}|${t.id}`,
       };
     });
   };
@@ -305,7 +396,7 @@ export default function StudioWorkflowManager() {
         roleId: 'r5',
         dueDate: dueDate.toISOString().split('T')[0],
         albumId: album.id,
-        completionKey: `album_${album.id}_${t.id}`,
+        completionKey: `album|${album.id}|${t.id}`,
       };
     });
   };
@@ -317,10 +408,18 @@ export default function StudioWorkflowManager() {
 
   const getMarketingTasksForProject = (project) => {
     if (project.shootType !== '婚礼' && project.shootType !== '婚纱') return [];
+    const mk = (tplId, name, duration, description) => ({
+      id: `${tplId}_${project.id}`,
+      templateId: tplId,
+      roleId: 'r7',
+      name, frequency: '项目联动', duration, description,
+      linkedProjectId: project.id,
+      completionKey: `linked|${tplId}|${project.id}`,
+    });
     return [
-      { id: `mk_blog_${project.id}`, roleId: 'r7', name: `撰写【${project.clientName}${project.shootType}】博客文章`, frequency: '项目联动', duration: '90', description: `为客户【${project.clientName}】的${project.shootType}拍摄撰写博客内容,发布到工作室网站blog`, linkedProjectId: project.id },
-      { id: `mk_ig_${project.id}`, roleId: 'r7', name: `在Instagram发布【${project.clientName}${project.shootType}】拼图`, frequency: '项目联动', duration: '60', description: `挑选精修图制作Instagram拼图,发布到工作室Instagram账号`, linkedProjectId: project.id },
-      { id: `mk_xhs_${project.id}`, roleId: 'r7', name: `在小红书婚礼账号发布【${project.clientName}${project.shootType}】成片`, frequency: '项目联动', duration: '60', description: `挑选精修成片,撰写文案,发布到小红书婚礼账号`, linkedProjectId: project.id },
+      mk('mk_blog', `撰写【${project.clientName}${project.shootType}】博客文章`, '90', `为客户【${project.clientName}】的${project.shootType}拍摄撰写博客内容,发布到工作室网站blog`),
+      mk('mk_ig',   `在Instagram发布【${project.clientName}${project.shootType}】拼图`, '60', `挑选精修图制作Instagram拼图,发布到工作室Instagram账号`),
+      mk('mk_xhs',  `在小红书婚礼账号发布【${project.clientName}${project.shootType}】成片`, '60', `挑选精修成片,撰写文案,发布到小红书婚礼账号`),
     ];
   };
 
@@ -399,7 +498,7 @@ export default function StudioWorkflowManager() {
     ...allLinkedTasks,
   ];
   const completedToday = todayTasks.filter(t => {
-    const key = t.frequency === '项目联动' ? `linked_${t.id}` : `${t.id}_${todayKey}`;
+    const key = t.frequency === '项目联动' ? t.completionKey : `${t.id}|${todayKey}`;
     return completions[key];
   }).length;
 
@@ -574,11 +673,11 @@ export default function StudioWorkflowManager() {
                 
                 const uncompletedDaily = roleTasks.filter(t => {
                   const isLinked = t.frequency === '项目联动';
-                  if (isLinked) return !completions[`linked_${t.id}`];
+                  if (isLinked) return !completions[t.completionKey];
                   const isToday = (t.frequency === '每日') || 
                     (t.frequency === '每周' && new Date().getDay() === (t.weekday ?? 1)) ||
                     (t.frequency === '每月' && new Date().getDate() === (t.monthday ?? 1));
-                  return isToday && !completions[`${t.id}_${todayKey}`];
+                  return isToday && !completions[`${t.id}|${todayKey}`];
                 }).length;
                 
                 const uncompletedProjectTasks = roleProjects.reduce((sum, p) => {
@@ -757,13 +856,13 @@ export default function StudioWorkflowManager() {
                                         onConfirm: () => {
                                           const relatedC = {};
                                           Object.keys(albumCompletions).forEach(key => {
-                                            if (key.startsWith(`album_${album.id}_`)) relatedC[key] = albumCompletions[key];
+                                            if (key.startsWith(`album|${album.id}|`)) relatedC[key] = albumCompletions[key];
                                           });
                                           moveToTrash('album', album, relatedC);
                                           updateAlbumDesigns(albumDesigns.filter(x => x.id !== album.id));
                                           const cleaned = { ...albumCompletions };
                                           Object.keys(cleaned).forEach(key => {
-                                            if (key.startsWith(`album_${album.id}_`)) delete cleaned[key];
+                                            if (key.startsWith(`album|${album.id}|`)) delete cleaned[key];
                                           });
                                           updateAlbumCompletions(cleaned);
                                           setConfirmDialog(null);
@@ -795,7 +894,7 @@ export default function StudioWorkflowManager() {
                             <div className="space-y-1.5">
                               {roleTasks.map(t => {
                                 const isLinked = t.frequency === '项目联动';
-                                const completionKey = isLinked ? `linked_${t.id}` : `${t.id}_${todayKey}`;
+                                const completionKey = isLinked ? t.completionKey : `${t.id}|${todayKey}`;
                                 const isCompleted = completions[completionKey];
                                 const isToday = isLinked || (t.frequency === '每日') || 
                                   (t.frequency === '每周' && new Date().getDay() === (t.weekday ?? 1)) ||
@@ -1268,7 +1367,7 @@ function TodayView({ todayTasks, roles, completions, todayKey, updateCompletions
   const renderDailyTask = (task) => {
     const role = roles.find(r => r.id === task.roleId);
     const isLinked = task.frequency === '项目联动';
-    const completionKey = isLinked ? `linked_${task.id}` : `${task.id}_${todayKey}`;
+    const completionKey = isLinked ? task.completionKey : `${task.id}|${todayKey}`;
     const isCompleted = completions[completionKey];
     return (
       <div key={task.id} className={`bg-white rounded-xl border p-3 flex items-center gap-3 transition ${
@@ -1338,7 +1437,7 @@ function TodayView({ todayTasks, roles, completions, todayKey, updateCompletions
             const projectsInSlot = slotProjectTasks[slot.id] || [];
             const totalInSlot = dailyInSlot.length + projectsInSlot.length;
             const completedInSlot = 
-              dailyInSlot.filter(t => completions[t.frequency === '项目联动' ? `linked_${t.id}` : `${t.id}_${todayKey}`]).length +
+              dailyInSlot.filter(t => completions[t.frequency === '项目联动' ? t.completionKey : `${t.id}|${todayKey}`]).length +
               projectsInSlot.filter(t => isTaskCompleted(t)).length;
             
             return (
@@ -1419,13 +1518,13 @@ function WeeklyView({ tasks, roles, completions, todayKey, updateCompletions, sp
   });
   
   // 进度统计
-  const completedCount = weeklyTasks.filter(t => completions[`${t.id}_${todayKey}`]).length;
+  const completedCount = weeklyTasks.filter(t => completions[`${t.id}|${todayKey}`]).length;
   const totalCount = weeklyTasks.length;
   const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
   
   // 按截止日期分类:逾期 / 今日 / 本周内 / 之后
   const today = new Date(todayKey);
-  const overdueTasks = weeklyTasks.filter(t => t.dueDate && new Date(t.dueDate) < today && !completions[`${t.id}_${todayKey}`]);
+  const overdueTasks = weeklyTasks.filter(t => t.dueDate && new Date(t.dueDate) < today && !completions[`${t.id}|${todayKey}`]);
   
   const formatDueDate = (dateStr) => {
     if (!dateStr) return '';
@@ -1510,7 +1609,7 @@ function WeeklyView({ tasks, roles, completions, todayKey, updateCompletions, sp
             const role = roles.find(r => r.id === roleId);
             if (!role) return null;
             const roleTasks = tasksByRole[roleId];
-            const roleCompleted = roleTasks.filter(t => completions[`${t.id}_${todayKey}`]).length;
+            const roleCompleted = roleTasks.filter(t => completions[`${t.id}|${todayKey}`]).length;
             
             return (
               <div key={roleId} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -1531,7 +1630,7 @@ function WeeklyView({ tasks, roles, completions, todayKey, updateCompletions, sp
                 </div>
                 <div className="divide-y divide-slate-100">
                   {roleTasks.map(t => {
-                    const completionKey = `${t.id}_${todayKey}`;
+                    const completionKey = `${t.id}|${todayKey}`;
                     const isCompleted = completions[completionKey];
                     const priority = getPriorityFromDescription(t.description);
                     
