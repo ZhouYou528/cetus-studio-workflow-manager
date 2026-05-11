@@ -81,6 +81,42 @@ async function canAccessParent(
   return !!exists;
 }
 
+// 注意:Hono 按注册顺序匹配,更具体的路由必须先注册。
+// `/:id/download` 在 `/:type/:id` 之前 — 否则下载请求会先命中 list 路由(type='att_xxx', id='download')。
+
+// ── 下载:GET /api/attachments/:id/download ────────────
+app.get('/:id/download', async (c) => {
+  const id = c.req.param('id');
+  const row = await one<{
+    id: string;
+    parentType: ParentType;
+    parentId: string;
+    r2Key: string;
+    filename: string;
+    contentType: string | null;
+  }>(
+    c,
+    `SELECT id, parent_type, parent_id, r2_key, filename, content_type FROM attachments WHERE id = ?`,
+    id,
+  );
+  if (!row) return c.json({ error: 'not_found' }, 404);
+  if (!(await canAccessParent(c.env, c.var.user, row.parentType, row.parentId))) {
+    return c.json({ error: 'forbidden' }, 403);
+  }
+
+  const obj = await c.env.BUCKET.get(row.r2Key);
+  if (!obj) return c.json({ error: 'file_gone' }, 410);
+
+  const headers = new Headers();
+  if (row.contentType) headers.set('content-type', row.contentType);
+  // RFC 5987:用 filename*=UTF-8''<percent-encoded> 支持 unicode 文件名
+  const ascii = row.filename.replace(/[^\x20-\x7e]/g, '_');
+  headers.set('content-disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(row.filename)}`);
+  headers.set('cache-control', 'private, max-age=60');
+
+  return new Response(obj.body, { headers });
+});
+
 // ── 列表:GET /api/attachments/:type/:id ────────────────
 app.get('/:type/:id', async (c) => {
   const type = c.req.param('type');
@@ -153,39 +189,6 @@ app.post('/:type/:id', async (c) => {
     attId,
   );
   return c.json(created, 201);
-});
-
-// ── 下载:GET /api/attachments/:id/download ────────────
-app.get('/:id/download', async (c) => {
-  const id = c.req.param('id');
-  const row = await one<{
-    id: string;
-    parentType: ParentType;
-    parentId: string;
-    r2Key: string;
-    filename: string;
-    contentType: string | null;
-  }>(
-    c,
-    `SELECT id, parent_type, parent_id, r2_key, filename, content_type FROM attachments WHERE id = ?`,
-    id,
-  );
-  if (!row) return c.json({ error: 'not_found' }, 404);
-  if (!(await canAccessParent(c.env, c.var.user, row.parentType, row.parentId))) {
-    return c.json({ error: 'forbidden' }, 403);
-  }
-
-  const obj = await c.env.BUCKET.get(row.r2Key);
-  if (!obj) return c.json({ error: 'file_gone' }, 410);
-
-  const headers = new Headers();
-  if (row.contentType) headers.set('content-type', row.contentType);
-  // RFC 5987:用 filename*=UTF-8''<percent-encoded> 支持 unicode 文件名
-  const ascii = row.filename.replace(/[^\x20-\x7e]/g, '_');
-  headers.set('content-disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(row.filename)}`);
-  headers.set('cache-control', 'private, max-age=60');
-
-  return new Response(obj.body, { headers });
 });
 
 // ── 删除:DELETE /api/attachments/:id ──────────────────

@@ -147,6 +147,17 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 **时区**
 - Worker 永远跑 UTC。前端 `localDateParams()` 拼出本地 TZ 的 `date=YYYY-MM-DD&dow=N&dom=N` 传给 bootstrap / tasks/today / tasks/weekly,后端识别这些参数后用它们,缺省时 fallback UTC
 
+**修 bug:项目任务按角色过滤**
+- `getTodayProjectTasks()` 之前对所有 project 硬循环 `r1/r3/r2`,无视当前用户角色
+- 现在加 `isVisibleRole(roleId)`:owner 全可见;assistant 仅 `assignedRoles` 里的
+- 副作用:主摄建项目后,只有主摄/owner 在「今日待办」看到 r1 任务;二摄/修图/广告设计等队友看不到不该看到的
+
+**附件 cascade 清理**
+- **进回收站时附件保留**(支持 30 天内恢复时附件随同回来)
+- **永久删除 / 清空回收站 / 30 天自动清理**:同步清掉 R2 对象 + `attachments` DB 行
+- role 类型的 trash:级联到该 role 下所有 task 的附件
+- `cleanAttachmentsFor()` helper 集中处理:先 SELECT 出 r2_key,并行 `BUCKET.delete()`,再批 `DELETE FROM attachments`
+
 **任务行细节展示**
 - 任务行的右侧加 `📎 N` 小徽章(只在有附件时显示)
 - 任务行下方追加一行 `text-xs line-clamp-2` 显示 description 预览

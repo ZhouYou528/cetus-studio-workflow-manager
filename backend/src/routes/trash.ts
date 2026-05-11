@@ -16,10 +16,74 @@ function scopeWhere(user: AuthUser): { sql: string; binds: unknown[] } {
   return { sql: ' AND deleted_by = ?', binds: [user.email] };
 }
 
-// 列出回收站(自己的或全部)。顺手做 lazy 清理:30 天以上的物理删除。
+// 从一条 trash row 推出受影响的 (parent_type, parent_id) 元组列表,
+// 用于永删/清空/30天自动清时,清理对应 R2 文件 + attachments DB 行。
+type TrashType = 'task' | 'project' | 'album' | 'role';
+function affectedParents(type: TrashType, itemData: Record<string, unknown>): Array<{ pt: 'task' | 'project' | 'album'; pid: string }> {
+  if (type === 'task') {
+    const id = itemData.id as string | undefined;
+    return id ? [{ pt: 'task', pid: id }] : [];
+  }
+  if (type === 'project') {
+    const id = itemData.id as string | undefined;
+    return id ? [{ pt: 'project', pid: id }] : [];
+  }
+  if (type === 'album') {
+    const id = itemData.id as string | undefined;
+    return id ? [{ pt: 'album', pid: id }] : [];
+  }
+  if (type === 'role') {
+    // role 的 itemData 是 { role, tasks: [...] };role 本身没附件,但下属 tasks 有
+    const tasks = (itemData.tasks as Array<{ id: string }> | undefined) ?? [];
+    return tasks.filter((t) => t && t.id).map((t) => ({ pt: 'task', pid: t.id }));
+  }
+  return [];
+}
+
+// 批量清理给定 trash rows 对应的所有附件(R2 对象 + DB 行)
+async function cleanAttachmentsFor(env: Bindings, trashRows: Array<{ type: string; itemData: Record<string, unknown> | string }>): Promise<void> {
+  const parents: Array<{ pt: string; pid: string }> = [];
+  for (const r of trashRows) {
+    // itemData 在 D1 是 TEXT 列,rowToCamel 已自动 JSON.parse 成对象。这里防御一下也处理字符串。
+    const data = typeof r.itemData === 'string' ? JSON.parse(r.itemData) : r.itemData;
+    parents.push(...affectedParents(r.type as TrashType, data as Record<string, unknown>));
+  }
+  if (parents.length === 0) return;
+
+  // 找到所有受影响的 attachments 行 → 先拿到 r2_key,再批删 R2 + DB
+  const conditions = parents.map(() => '(parent_type = ? AND parent_id = ?)').join(' OR ');
+  const binds: string[] = [];
+  parents.forEach((p) => { binds.push(p.pt, p.pid); });
+  const rows = await env.DB
+    .prepare(`SELECT id, r2_key FROM attachments WHERE ${conditions}`)
+    .bind(...binds)
+    .all<{ id: string; r2_key: string }>();
+  const atts = rows.results ?? [];
+  if (atts.length === 0) return;
+
+  // 并行删 R2 对象
+  await Promise.all(atts.map((a) => env.BUCKET.delete(a.r2_key)));
+  // 清 DB 行(用 IN 一次清完)
+  const idPlaceholders = atts.map(() => '?').join(',');
+  await env.DB
+    .prepare(`DELETE FROM attachments WHERE id IN (${idPlaceholders})`)
+    .bind(...atts.map((a) => a.id))
+    .run();
+}
+
+// 列出回收站。顺手做 lazy 清理:30 天以上的物理删除(同步清掉对应附件)。
 app.get('/', async (c) => {
   const cutoff = Date.now() - THIRTY_DAYS_MS;
-  await c.env.DB.prepare(`DELETE FROM trash WHERE deleted_at < ?`).bind(cutoff).run();
+  // 先把要清的 row 捞出来,以便清附件
+  const stale = await all<{ id: string; type: string; itemData: Record<string, unknown> }>(
+    c,
+    `SELECT id, type, item_data FROM trash WHERE deleted_at < ?`,
+    cutoff,
+  );
+  if (stale.length > 0) {
+    await cleanAttachmentsFor(c.env, stale);
+    await c.env.DB.prepare(`DELETE FROM trash WHERE deleted_at < ?`).bind(cutoff).run();
+  }
 
   const { sql, binds } = scopeWhere(c.var.user);
   const items = await all(
@@ -54,22 +118,35 @@ app.post('/:id/restore', async (c) => {
   }
 });
 
-// 永久删除单条:assistant 只能删自己的
+// 永久删除单条:assistant 只能删自己的;一并清理附件 R2 + DB
 app.delete('/:id', async (c) => {
   const id = c.req.param('id');
   const { sql, binds } = scopeWhere(c.var.user);
-  const res = await c.env.DB
-    .prepare(`DELETE FROM trash WHERE id = ?${sql}`)
-    .bind(id, ...binds)
-    .run();
-  if (!res.success || res.meta?.changes === 0) return c.json({ error: 'not_found' }, 404);
+  const row = await one<{ type: string; itemData: Record<string, unknown> }>(
+    c,
+    `SELECT type, item_data FROM trash WHERE id = ?${sql}`,
+    id,
+    ...binds,
+  );
+  if (!row) return c.json({ error: 'not_found' }, 404);
+
+  await cleanAttachmentsFor(c.env, [row]);
+  await c.env.DB.prepare(`DELETE FROM trash WHERE id = ?`).bind(id).run();
   return c.json({ ok: true });
 });
 
-// 清空:owner 清全部;assistant 清自己的
+// 清空:owner 清全部;assistant 清自己的;一并清理附件
 app.delete('/', async (c) => {
   const { sql, binds } = scopeWhere(c.var.user);
-  await c.env.DB.prepare(`DELETE FROM trash WHERE 1=1${sql}`).bind(...binds).run();
+  const rows = await all<{ id: string; type: string; itemData: Record<string, unknown> }>(
+    c,
+    `SELECT id, type, item_data FROM trash WHERE 1=1${sql}`,
+    ...binds,
+  );
+  if (rows.length > 0) {
+    await cleanAttachmentsFor(c.env, rows);
+    await c.env.DB.prepare(`DELETE FROM trash WHERE 1=1${sql}`).bind(...binds).run();
+  }
   return c.json({ ok: true });
 });
 

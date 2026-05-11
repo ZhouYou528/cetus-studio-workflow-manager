@@ -559,11 +559,19 @@ export default function StudioWorkflowManager() {
     return completions[key];
   }).length;
 
+  // 当前用户能否看到该 role 的任务:owner 全可见;assistant 仅 assignedRoles 里的
+  const isVisibleRole = (roleId) => {
+    if (!currentUser) return false;
+    if (currentUser.role === 'owner') return true;
+    return (currentUser.assignedRoles || []).includes(roleId);
+  };
+
   const getTodayProjectTasks = () => {
     const today = new Date().toISOString().split('T')[0];
     const result = [];
     projects.forEach(project => {
       ['r1', 'r3'].forEach(roleId => {
+        if (!isVisibleRole(roleId)) return;
         if (roleId === 'r3' && !isShootingCompleted(project)) return;
         const projectTasks = getProjectTasks(project, roleId);
         projectTasks.forEach(t => {
@@ -572,7 +580,7 @@ export default function StudioWorkflowManager() {
           }
         });
       });
-      if (project.shootType === '婚礼') {
+      if (project.shootType === '婚礼' && isVisibleRole('r2')) {
         const r2Tasks = getProjectTasks(project, 'r2');
         r2Tasks.forEach(t => {
           if (t.dueDate <= today && !projectCompletions[t.completionKey]) {
@@ -581,14 +589,16 @@ export default function StudioWorkflowManager() {
         });
       }
     });
-    albumDesigns.forEach(album => {
-      const albumTasks = getAlbumTasks(album);
-      albumTasks.forEach(t => {
-        if (t.dueDate <= today && !albumCompletions[t.completionKey]) {
-          result.push({ ...t, album, isAlbum: true });
-        }
+    if (isVisibleRole('r5')) {
+      albumDesigns.forEach(album => {
+        const albumTasks = getAlbumTasks(album);
+        albumTasks.forEach(t => {
+          if (t.dueDate <= today && !albumCompletions[t.completionKey]) {
+            result.push({ ...t, album, isAlbum: true });
+          }
+        });
       });
-    });
+    }
     return result.sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   };
 
