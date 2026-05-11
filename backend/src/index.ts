@@ -1,25 +1,39 @@
 import { Hono } from 'hono';
+import { requireAuth } from './auth';
+import type { AuthUser } from './db';
+import usersRoute from './routes/users';
+import rolesRoute from './routes/roles';
+import tasksRoute from './routes/tasks';
 
-// Cloudflare Workers 把绑定(DB、KV、Vars)放在 c.env 里 — 这里声明类型让 IDE 补全。
-// Phase 2 加上 DB: D1Database 后,routes 里就能 c.env.DB.prepare(...) 直接查。
 export type Bindings = {
   DEV_USER_EMAIL: string;
-  // DB: D1Database;  // Phase 2 启用
+  OWNER_EMAILS: string;
+  DB: D1Database;
 };
 
-const app = new Hono<{ Bindings: Bindings }>();
+export type AppVars = { user: AuthUser };
 
+const app = new Hono<{ Bindings: Bindings; Variables: AppVars }>();
+
+// 公开端点(挡在 auth 之前)
 app.get('/api/health', (c) =>
   c.json({ ok: true, service: 'studio-workflow-manager-api', ts: Date.now() })
 );
 
-app.get('/api/me', (c) => {
-  // Phase 3 改为完整的 Access JWT 解析 + DB 读用户。这里先返回伪造身份用于本地冒烟。
-  const accessEmail = c.req.header('Cf-Access-Authenticated-User-Email');
-  const email = accessEmail ?? c.env.DEV_USER_EMAIL;
-  return c.json({ email, role: 'owner', source: accessEmail ? 'access' : 'dev-env' });
-});
+// 所有 /api/* 走 auth(/api/health 已经在上面命中,不会再进这里)
+app.use('/api/*', requireAuth);
+
+app.route('/api/users', usersRoute);
+app.route('/api/roles', rolesRoute);
+app.route('/api/tasks', tasksRoute);
+
+// 兼容老路径 /api/me → /api/users/me(前端原 Artifact 用的是 /api/me)
+app.get('/api/me', (c) => c.json(c.var.user));
 
 app.notFound((c) => c.json({ error: 'not_found', path: c.req.path }, 404));
+app.onError((err, c) => {
+  console.error('API error:', err);
+  return c.json({ error: 'internal', message: err.message }, 500);
+});
 
 export default app;

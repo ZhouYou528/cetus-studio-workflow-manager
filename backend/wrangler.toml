@@ -7,11 +7,16 @@ compatibility_date = "2025-01-15"
 compatibility_flags = ["nodejs_compat"]
 
 # 本地开发时,Access 不生效拿不到邮箱 header。auth.ts 会回退到这个值。
+# OWNER_EMAILS:逗号分隔。任何此名单中的邮箱首次登录时自动 role='owner',
+# 其他邮箱默认 'assistant',需要 owner 在 /api/users/:email PATCH 升级。
 [vars]
 DEV_USER_EMAIL = "shirleyljychina@gmail.com"
+OWNER_EMAILS = "shirleyljychina@gmail.com"
 
-# Phase 2 启用:绑定 D1 数据库
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "studio_db"
-# database_id = "TBD"  # 部署时由 `wrangler d1 create studio_db` 生成,填回这里
+# D1 数据库绑定
+# 本地:wrangler 会在 .wrangler/state/v3/d1/ 自动建一个 SQLite 文件,database_id 写啥都行
+# 线上:Phase 8 部署前跑 `wrangler d1 create studio_db`,把它返回的真实 UUID 填到 database_id
+[[d1_databases]]
+binding = "DB"
+database_name = "studio_db"
+database_id = "local-placeholder"
