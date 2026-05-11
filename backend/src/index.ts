@@ -4,6 +4,9 @@ import type { AuthUser } from './db';
 import usersRoute from './routes/users';
 import rolesRoute from './routes/roles';
 import tasksRoute from './routes/tasks';
+import projectsRoute from './routes/projects';
+import albumsRoute from './routes/albums';
+import trashRoute from './routes/trash';
 
 export type Bindings = {
   DEV_USER_EMAIL: string;
@@ -26,6 +29,9 @@ app.use('/api/*', requireAuth);
 app.route('/api/users', usersRoute);
 app.route('/api/roles', rolesRoute);
 app.route('/api/tasks', tasksRoute);
+app.route('/api/projects', projectsRoute);
+app.route('/api/albums', albumsRoute);
+app.route('/api/trash', trashRoute);
 
 // 兼容老路径 /api/me → /api/users/me(前端原 Artifact 用的是 /api/me)
 app.get('/api/me', (c) => c.json(c.var.user));
