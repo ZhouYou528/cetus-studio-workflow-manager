@@ -22,6 +22,7 @@ import { useT } from './lib/i18n';
 import { taskCompletionKey } from './lib/taskKey';
 import { celebrateAllDone } from './lib/celebrate';
 import { useActiveTheme } from './lib/theme';
+import { useCountUp } from './lib/useCountUp';
 
 const DEFAULT_ROLES = [
   { id: 'r1', name: '主摄影师', icon: '📸', isAssistant: false, supportsProjects: true, duties: '负责拍摄方案制定、现场拍摄主导、把控整体画面质量、与客户沟通拍摄需求', color: 'bg-blue-500' },
@@ -665,6 +666,9 @@ export default function StudioWorkflowManager() {
     const key = taskCompletionKey(t, todayKey);
     return completions[key];
   }).length;
+  // 进度环百分比补间:数字 count-up + 圆弧 tween 都由这个动画值驱动,保持同步
+  const todayPct = todayTasks.length > 0 ? Math.round((completedToday / todayTasks.length) * 100) : 0;
+  const animatedPct = useCountUp(todayPct);
 
   // 方案 B:今日待办从"未清空"跨越到"全部完成"那一刻 → 彩带 + 横幅。
   // prevAllDoneRef 首跑只记基线(开页就已全完成时不放炮);total=0 不触发。
@@ -723,10 +727,48 @@ export default function StudioWorkflowManager() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 dark:from-slate-950 to-slate-100 dark:to-slate-900 flex items-center justify-center">
-        {theme.pokeball
-          ? <div className="w-14 h-14 pkmn-ball pkmn-spin" aria-label="loading" />
-          : <span className="text-4xl pkmn-spin inline-block" aria-label="loading">{theme.logo}</span>}
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 dark:from-slate-950 to-slate-100 dark:to-slate-900" aria-busy="true" aria-label="loading">
+        {/* 顶栏骨架 */}
+        <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700">
+          <div className="max-w-6xl mx-auto px-3 sm:px-4 py-3 sm:py-4">
+            <div className="flex items-center justify-between gap-2 mb-4">
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className="skeleton w-10 h-10 rounded-xl shrink-0" />
+                <div className="space-y-2 min-w-0">
+                  <div className="skeleton h-4 w-40" />
+                  <div className="skeleton h-3 w-56 hidden sm:block" />
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="skeleton w-12 h-12 rounded-full" />
+                <div className="skeleton w-8 h-8 rounded-lg" />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="skeleton h-7 w-20 rounded-lg" />
+              ))}
+            </div>
+          </div>
+        </div>
+        {/* 内容卡片骨架 */}
+        <div className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6">
+          <div className="skeleton h-6 w-36 mb-5" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+                <div className="flex items-center gap-3">
+                  <div className="skeleton w-10 h-10 rounded-lg shrink-0" />
+                  <div className="flex-1 space-y-2 min-w-0">
+                    <div className="skeleton h-4 w-1/2" />
+                    <div className="skeleton h-3 w-2/3" />
+                  </div>
+                  <div className="skeleton w-10 h-5 rounded-full shrink-0" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -770,11 +812,11 @@ export default function StudioWorkflowManager() {
                 <svg className="w-10 h-10 sm:w-12 sm:h-12 transform -rotate-90 absolute">
                   <circle cx="50%" cy="50%" r="40%" stroke="currentColor" strokeWidth="3" fill="none" className="text-slate-200 dark:text-slate-700" />
                   <circle cx="50%" cy="50%" r="40%" stroke="currentColor" strokeWidth="3" fill="none" pathLength={100}
-                    strokeDasharray={`${todayTasks.length > 0 ? (completedToday/todayTasks.length) * 100 : 0} 100`}
-                    className="transition-all" style={{ color: 'var(--th-primary)' }} />
+                    strokeDasharray={`${animatedPct} 100`}
+                    style={{ color: 'var(--th-primary)' }} />
                 </svg>
                 <span className="text-[10px] sm:text-xs font-bold text-slate-700 dark:text-slate-300">
-                  {todayTasks.length > 0 ? Math.round((completedToday/todayTasks.length) * 100) : 0}%
+                  {animatedPct}%
                 </span>
               </div>
               {currentUser && (
@@ -1275,9 +1317,11 @@ export default function StudioWorkflowManager() {
                                       </>
                                     )}
                                     </div>
-                                    {isExpanded && !isLinked && (
-                                      // pl-[19px] 让第一层竖线中心对齐父圆圈(p-2.5 + w-5 → 中心 20px;border 居中 = 19+1)
-                                      <div className="pl-[19px] pr-2.5 pb-2.5 -mt-0.5">
+                                    {!isLinked && (
+                                      // collapsible:高度+透明度过渡;pl-[19px] 让第一层竖线中心对齐父圆圈
+                                      <div className={`collapsible ${isExpanded ? 'open' : ''}`}>
+                                       <div>
+                                        <div className="pl-[19px] pr-2.5 pb-2.5 -mt-0.5">
                                         <SubtaskTree
                                           parentTaskId={t.id}
                                           childrenByParent={childrenByParent}
@@ -1312,6 +1356,8 @@ export default function StudioWorkflowManager() {
                                           }}
                                           onAddSubtask={addSubtask}
                                         />
+                                        </div>
+                                       </div>
                                       </div>
                                     )}
                                   </div>

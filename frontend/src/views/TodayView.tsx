@@ -146,9 +146,11 @@ export default function TodayView({
             </button>
           )}
         </div>
-        {isExpanded && canExpand && (
-          // pl-[21px] 对齐父圆圈中心 (p-3 + w-5/2 = 22px;border 居中 = 21+1)
-          <div className="pl-[21px] pr-3 pb-3 -mt-1">
+        {canExpand && (
+          <div className={`collapsible ${isExpanded ? 'open' : ''}`}>
+           <div>
+            {/* pl-[21px] 对齐父圆圈中心 (p-3 + w-5/2 = 22px;border 居中 = 21+1) */}
+            <div className="pl-[21px] pr-3 pb-3 -mt-1">
             <SubtaskTree
               parentTaskId={task.id}
               childrenByParent={childrenByParent!}
@@ -164,6 +166,8 @@ export default function TodayView({
               onDelete={(sub) => onDeleteTask?.(sub)}
               onAddSubtask={addSubtask!}
             />
+            </div>
+           </div>
           </div>
         )}
       </div>
@@ -308,7 +312,9 @@ export default function TodayView({
                     ? <ChevronDown className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />
                     : <ChevronRight className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />}
                 </button>
-                {isExpanded && <div className="px-3 pb-3">{s.body}</div>}
+                <div className={`collapsible ${isExpanded ? 'open' : ''}`}>
+                  <div><div className="px-3 pb-3">{s.body}</div></div>
+                </div>
               </div>
             );
           })}

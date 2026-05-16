@@ -153,7 +153,8 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                     ? <ChevronDown className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />
                     : <ChevronRight className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />}
                 </button>
-                {isRoleExpanded && (
+                <div className={`collapsible ${isRoleExpanded ? 'open' : ''}`}>
+                 <div>
                 <div className="divide-y divide-slate-100 dark:divide-slate-700">
                   {roleTasks.map(x => {
                     const completionKey = taskCompletionKey(x, todayKey);
@@ -228,9 +229,11 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                           </button>
                         </div>
                         </div>
-                        {isExpanded && childrenByParent && addSubtask && (
-                          // pl-[21px] 对齐父圆圈中心 (p-3 + w-5/2 = 22px;border 居中 = 21+1)
-                          <div className="pl-[21px] pr-3 pb-3">
+                        {childrenByParent && addSubtask && (
+                          <div className={`collapsible ${isExpanded ? 'open' : ''}`}>
+                           <div>
+                            {/* pl-[21px] 对齐父圆圈中心 (p-3 + w-5/2 = 22px;border 居中 = 21+1) */}
+                            <div className="pl-[21px] pr-3 pb-3">
                             <SubtaskTree
                               parentTaskId={x.id}
                               childrenByParent={childrenByParent}
@@ -246,13 +249,16 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                               onDelete={onDelete}
                               onAddSubtask={addSubtask}
                             />
+                            </div>
+                           </div>
                           </div>
                         )}
                       </div>
                     );
                   })}
                 </div>
-                )}
+                 </div>
+                </div>
               </div>
             );
           })}

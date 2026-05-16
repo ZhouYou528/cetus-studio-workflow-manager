@@ -70,3 +70,55 @@
 @keyframes pkmn-spin { to { transform: rotate(360deg); } }
 .pkmn-spin { animation: pkmn-spin 0.9s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .pkmn-spin { animation: none; } }
+
+/* ── 折叠/展开高度+透明度过渡(grid-rows 0fr↔1fr 技巧,无需测量 JS)──
+   用法:外层 .collapsible(+ .open 表示展开),内层包一层(自动 overflow:hidden)。
+   始终挂载内容,只靠 grid 行高 + 透明度过渡,避免"啪"地瞬现/瞬消。 */
+.collapsible {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.22s ease, opacity 0.22s ease;
+}
+.collapsible.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.collapsible > * {
+  overflow: hidden;
+  min-height: 0; /* grid 子项必须设,否则收不到 0 */
+}
+
+/* 列表项进入:加任务/展开时轻微淡入上移 */
+@keyframes item-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.item-in { animation: item-in 0.2s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .collapsible { transition: none; }
+  .item-in { animation: none; }
+}
+
+/* 加载骨架屏:内容形状的 shimmer 占位,比转圈更"专业不卡住" */
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: rgb(226 232 240);
+  border-radius: 0.5rem;
+}
+.dark .skeleton { background: rgb(51 65 85); }
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  animation: shimmer 1.4s infinite;
+}
+.dark .skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+}
+@media (prefers-reduced-motion: reduce) { .skeleton::after { animation: none; } }
