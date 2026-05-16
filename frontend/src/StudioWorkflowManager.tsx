@@ -19,6 +19,7 @@ import UserEditModal from './components/UserEditModal';
 import HeaderControls from './components/HeaderControls';
 import SubtaskTree from './components/SubtaskTree';
 import { useT } from './lib/i18n';
+import { taskCompletionKey } from './lib/taskKey';
 
 const DEFAULT_ROLES = [
   { id: 'r1', name: '主摄影师', icon: '📸', isAssistant: false, supportsProjects: true, duties: '负责拍摄方案制定、现场拍摄主导、把控整体画面质量、与客户沟通拍摄需求', color: 'bg-blue-500' },
@@ -161,8 +162,8 @@ export default function StudioWorkflowManager() {
     return map;
   }, [attachments]);
 
-  // 子任务索引:parentTaskId → 该父下的所有直接子任务,递归展开时用
-  const childrenByParent = React.useMemo(() => {
+  // DB 真实子任务索引:parentTaskId → 直接子任务。marketing 联动任务在下面合并进来。
+  const dbChildrenByParent = React.useMemo(() => {
     const map = {};
     tasks.forEach(t => {
       const pid = t.parentTaskId;
@@ -522,6 +523,18 @@ export default function StudioWorkflowManager() {
     return mainPhotographerTasks.every(t => projectCompletions[t.completionKey]);
   };
 
+  // 修图师(r3)该项目所有任务都完成 → Marketing 联动任务才出现。
+  // length>0 防御:r3 模板为空时 [].every() 会误判为 true。
+  const isRetouchCompleted = (project) => {
+    const retoucherTasks = getProjectTasks(project, 'r3');
+    return retoucherTasks.length > 0 && retoucherTasks.every(t => projectCompletions[t.completionKey]);
+  };
+
+  // 联动任务做"显示层子任务":blog→「更新工作室网站及blog」(t_mk_1)、
+  // IG→「更新Instagram」(t_mk_2)、婚礼小红书→「更新婚礼小红书」(t_mk_4)。
+  // 这些不是 DB 行,不写 parent_task_id,仅 UI 上挂载;完成态仍走 linked| key。
+  const MK_PARENT_BY_TPL = { mk_blog: 't_mk_1', mk_ig: 't_mk_2', mk_xhs: 't_mk_4' };
+
   const getMarketingTasksForProject = (project) => {
     if (project.shootType !== '婚礼' && project.shootType !== '婚纱') return [];
     const mk = (tplId, name, duration, description) => ({
@@ -530,6 +543,7 @@ export default function StudioWorkflowManager() {
       roleId: 'r7',
       name, frequency: '项目联动', duration, description,
       linkedProjectId: project.id,
+      parentTaskId: MK_PARENT_BY_TPL[tplId] ?? null,
       completionKey: `linked|${tplId}|${project.id}`,
     });
     return [
@@ -550,7 +564,8 @@ export default function StudioWorkflowManager() {
     if (roleId !== 'r7') return [];
     const linkedTasks = [];
     projects.forEach(p => {
-      if (isShootingCompleted(p)) {
+      // 触发条件改为「修图师任务全完成」,而不是原来的「主摄任务全完成」。
+      if (isRetouchCompleted(p)) {
         linkedTasks.push(...getMarketingTasksForProject(p));
       }
     });
@@ -608,21 +623,21 @@ export default function StudioWorkflowManager() {
       allLinkedTasks.push(...getLinkedTasksForRole(r.id));
     }
   });
-  
-  const todayTasks = [
-    ...tasks.filter(t => {
-      if (t.parentTaskId) return false; // 子任务不出现在顶层 today 列表,只在父任务展开里出现
-      if (t.frequency === '每日') return true;
-      if (t.frequency === '每周' && new Date().getDay() === (t.weekday ?? 1)) return true;
-      if (t.frequency === '每月' && new Date().getDate() === (t.monthday ?? 1)) return true;
-      return false;
-    }),
-    ...allLinkedTasks,
-  ];
-  const completedToday = todayTasks.filter(t => {
-    const key = t.frequency === '项目联动' ? t.completionKey : `${t.id}|${todayKey}`;
-    return completions[key];
-  }).length;
+
+  // 合并 DB 子任务 + marketing 联动任务(按 parentTaskId 挂到 t_mk_1/2/4 下)。
+  // allLinkedTasks 每次 render 重建,这里用普通 const 即可,不必 memo。
+  const childrenByParent = (() => {
+    const map = {};
+    for (const pid in dbChildrenByParent) map[pid] = [...dbChildrenByParent[pid]];
+    allLinkedTasks.forEach(lt => {
+      const pid = lt.parentTaskId;
+      if (pid) {
+        if (!map[pid]) map[pid] = [];
+        map[pid].push(lt);
+      }
+    });
+    return map;
+  })();
 
   // 当前用户能否看到该 role 的任务:owner 全可见;assistant 仅 assignedRoles 里的
   const isVisibleRole = (roleId) => {
@@ -630,6 +645,23 @@ export default function StudioWorkflowManager() {
     if (currentUser.role === 'owner') return true;
     return (currentUser.assignedRoles || []).includes(roleId);
   };
+
+  const todayTasks = [
+    ...tasks.filter(t => {
+      if (t.parentTaskId) return false; // 子任务不出现在顶层 today 列表,只在父任务展开里出现
+      if (!isVisibleRole(t.roleId)) return false; // 只显示当前用户能看到的职位的任务(assistant 仅自己 assignedRoles)
+      if (t.frequency === '每日') return true;
+      if (t.frequency === '每周' && new Date().getDay() === (t.weekday ?? 1)) return true;
+      if (t.frequency === '每月' && new Date().getDate() === (t.monthday ?? 1)) return true;
+      return false;
+    }),
+    // 已挂到周任务下的联动任务不再平铺,只在父任务展开里出现(避免重复显示)
+    ...allLinkedTasks.filter(t => !t.parentTaskId && isVisibleRole(t.roleId)),
+  ];
+  const completedToday = todayTasks.filter(t => {
+    const key = taskCompletionKey(t, todayKey);
+    return completions[key];
+  }).length;
 
   const getTodayProjectTasks = () => {
     const today = new Date().toISOString().split('T')[0];
@@ -877,9 +909,7 @@ export default function StudioWorkflowManager() {
                 // 待办计数:任何未勾选的任务都算"待办"。frequency 只影响 TodayView 里"何时展示",
                 // 不应影响这里的"是否已完成"。临时/每周非周一/每月非1号任务以前被错误地不计数。
                 const uncompletedDaily = roleTasks.filter(t => {
-                  const isLinked = t.frequency === '项目联动';
-                  const key = isLinked ? t.completionKey : `${t.id}|${todayKey}`;
-                  return !completions[key];
+                  return !completions[taskCompletionKey(t, todayKey)];
                 }).length;
                 
                 const uncompletedProjectTasks = roleProjects.reduce((sum, p) => {
@@ -1098,7 +1128,7 @@ export default function StudioWorkflowManager() {
                             <div className="space-y-1.5">
                               {roleTasks.filter(t => !t.parentTaskId).map(t => {
                                 const isLinked = t.frequency === '项目联动';
-                                const completionKey = isLinked ? t.completionKey : `${t.id}|${todayKey}`;
+                                const completionKey = taskCompletionKey(t, todayKey);
                                 const isCompleted = completions[completionKey];
                                 const isToday = isLinked || (t.frequency === '每日') ||
                                   (t.frequency === '每周' && new Date().getDay() === (t.weekday ?? 1)) ||
@@ -1106,7 +1136,8 @@ export default function StudioWorkflowManager() {
                                 const attCount = taskAttachmentCounts[t.id] ?? 0;
                                 const kids = childrenByParent[t.id] || [];
                                 const childTotal = kids.length;
-                                const childDone = kids.filter(k => completions[`${k.id}|${todayKey}`]).length;
+                                // 联动子任务用自己的 completionKey(linked|...),DB 子任务用 id|today
+                                const childDone = kids.filter(k => completions[taskCompletionKey(k, todayKey)]).length;
                                 const isExpanded = expandedTasks.has(t.id);
 
                                 return (
@@ -1144,6 +1175,23 @@ export default function StudioWorkflowManager() {
                                           <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded">{t.frequency}</span>
                                         )}
                                         {t.duration && <span>{t.duration}{ti('minutes')}</span>}
+                                        {!isLinked && t.frequency === '临时' && t.dueDate && (() => {
+                                          const d = new Date(t.dueDate + 'T00:00:00');
+                                          const base = new Date(todayKey + 'T00:00:00');
+                                          const diff = Math.ceil((d.getTime() - base.getTime()) / 86400000);
+                                          const cls = isCompleted
+                                            ? 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+                                            : diff <= 0
+                                              ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
+                                              : diff <= 3
+                                                ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+                                                : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400';
+                                          const label = diff < 0 ? ti('overdue_n_days', { n: Math.abs(diff) })
+                                            : diff === 0 ? ti('due_today')
+                                            : diff === 1 ? ti('due_tomorrow')
+                                            : ti('in_n_days', { n: diff });
+                                          return <span className={`px-1.5 py-0.5 rounded font-medium ${cls}`}>📅 {label}</span>;
+                                        })()}
                                         {!isLinked && isToday && !isCompleted && <span className="text-blue-600 font-medium">· {ti('today')}</span>}
                                       </div>
                                       {t.description && (
@@ -1198,7 +1246,7 @@ export default function StudioWorkflowManager() {
                                           todayKey={todayKey}
                                           level={1}
                                           onToggleComplete={(task) => {
-                                            const k = `${task.id}|${todayKey}`;
+                                            const k = taskCompletionKey(task, todayKey);
                                             updateCompletions({ ...completions, [k]: !completions[k] });
                                           }}
                                           onEdit={(task) => setEditingTask(task)}
@@ -1283,7 +1331,7 @@ export default function StudioWorkflowManager() {
                 {roles.map(role => {
                   const roleTasksAll = tasks.filter(t => t.roleId === role.id);
                   const total = roleTasksAll.length;
-                  const done = roleTasksAll.filter(t => completions[`${t.id}|${todayKey}`]).length;
+                  const done = roleTasksAll.filter(t => completions[taskCompletionKey(t, todayKey)]).length;
                   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
                   return (
                     <div key={role.id}>
@@ -1342,8 +1390,15 @@ export default function StudioWorkflowManager() {
           }}
           onClose={() => { setShowAddTask(false); setEditingTask(null); }}
           onSave={(taskData) => {
-            if (editingTask) updateTasks(tasks.map(t => t.id === editingTask.id ? { ...t, ...taskData } : t));
-            else updateTasks([...tasks, { id: `t${Date.now()}`, ...taskData }]);
+            // 临时任务自动进「本周待办」(isWeekly=true);非临时清掉残留 dueDate。
+            const isTemp = taskData.frequency === '临时';
+            const normalized = {
+              ...taskData,
+              isWeekly: isTemp,
+              dueDate: isTemp ? (taskData.dueDate ?? null) : null,
+            };
+            if (editingTask) updateTasks(tasks.map(t => t.id === editingTask.id ? { ...t, ...normalized } : t));
+            else updateTasks([...tasks, { id: `t${Date.now()}`, ...normalized }]);
             setShowAddTask(false); setEditingTask(null);
           }} />
       )}

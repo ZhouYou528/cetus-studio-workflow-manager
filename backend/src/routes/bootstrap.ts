@@ -58,6 +58,15 @@ app.get('/', async (c) => {
   for (const r of dailyRows) {
     completions[`${r.taskId}|${todayKey}`] = r.completedAt;
   }
+  // 临时任务一次性完成:completion_date 用固定哨兵 'once',与日期无关。
+  // 必须单独查回来,否则临时任务完成后跨天会显示成未完成。
+  const onceRows = await all<{ taskId: string; completedAt: number }>(
+    c,
+    `SELECT task_id, completed_at FROM task_completions WHERE completion_date = 'once'`,
+  );
+  for (const r of onceRows) {
+    completions[`${r.taskId}|once`] = r.completedAt;
+  }
   // Marketing 联动完成放进同一 `completions` 字典(前端原行为一致)
   const linkedRows = await all<{ projectId: string; taskTemplateId: string; completedAt: number }>(
     c,

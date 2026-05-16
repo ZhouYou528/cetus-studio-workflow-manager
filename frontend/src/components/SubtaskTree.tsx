@@ -7,6 +7,7 @@
 import { useState, type KeyboardEvent } from 'react';
 import { Check, ChevronDown, ChevronRight, Edit2, Paperclip, Plus, Trash2 } from 'lucide-react';
 import { useT } from '../lib/i18n';
+import { taskCompletionKey } from '../lib/taskKey';
 import type { Task } from '../lib/types';
 
 // 数据 level 1 = 顶层任务;最深允许 level 5。
@@ -83,16 +84,19 @@ function SubtaskRow({ task, childrenByParent, taskAttachmentCounts, completions,
   const t = useT();
   const [expanded, setExpanded] = useState(false);
   const grandchildren = childrenByParent[task.id] || [];
-  const completionKey = `${task.id}|${todayKey}`;
+  // 完成态 key 必须走共享 taskCompletionKey,否则与写入/计数侧不一致:
+  // 临时子任务用 ${id}|once、联动任务用自带 completionKey、其余按当天。
+  const isVirtual = !!(task as { completionKey?: string }).completionKey || task.frequency === '项目联动';
+  const completionKey = taskCompletionKey(task, todayKey);
   const isCompleted = !!completions[completionKey];
   const attCount = taskAttachmentCounts[task.id] ?? 0;
 
-  const childDone = grandchildren.filter((g) => completions[`${g.id}|${todayKey}`]).length;
+  const childDone = grandchildren.filter((g) => completions[taskCompletionKey(g, todayKey)]).length;
   const childTotal = grandchildren.length;
 
-  // 当前 SubtaskRow 是数据 level (level+1)。叶子层(数据 level == MAX_DEPTH)无法再加子任务,
-  // 也不会有子任务存在,所以隐藏 ▶ 箭头。
-  const isLeaf = level + 1 >= MAX_DEPTH;
+  // 虚拟任务(联动)不能再嵌子任务/编辑/删除。普通任务到叶子层(数据 level == MAX_DEPTH)
+  // 也隐藏 ▶ 箭头(不会有子任务,也不能再加)。
+  const isLeaf = isVirtual || level + 1 >= MAX_DEPTH;
 
   return (
     <div>
@@ -132,22 +136,24 @@ function SubtaskRow({ task, childrenByParent, taskAttachmentCounts, completions,
             <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1">{task.description}</p>
           )}
         </div>
-        <div className="flex gap-0.5 shrink-0">
-          <button
-            onClick={() => onEdit(task)}
-            className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500 dark:text-slate-400"
-            title={t('edit')}
-          >
-            <Edit2 className="w-3 h-3" />
-          </button>
-          <button
-            onClick={() => onDelete(task)}
-            className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded text-rose-500"
-            title={t('delete')}
-          >
-            <Trash2 className="w-3 h-3" />
-          </button>
-        </div>
+        {!isVirtual && (
+          <div className="flex gap-0.5 shrink-0">
+            <button
+              onClick={() => onEdit(task)}
+              className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded text-slate-500 dark:text-slate-400"
+              title={t('edit')}
+            >
+              <Edit2 className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => onDelete(task)}
+              className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded text-rose-500"
+              title={t('delete')}
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
+          </div>
+        )}
       </div>
 
       {expanded && !isLeaf && (

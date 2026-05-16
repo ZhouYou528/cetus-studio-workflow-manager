@@ -114,6 +114,7 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 - [x] **Phase 7**:GitHub 私有仓库,持续 push
 - [x] **Phase 8**:Cloudflare 部署 — 远程 D1 + Worker + Pages + 服务绑定 + Cloudflare Access(邮箱 OTP 登录,team domain `cetus-studio.cloudflareaccess.com`)+ Users 管理 tab(owner 给队友分配 assignedRoles)+ 顶栏 Sign Out + 用户名(name)字段:`PATCH /api/me` 任何用户自改 name,顶栏点击邮箱区域弹自编辑;assistant 在职位职责 tab 只能看到自己 assignedRoles 里的职位卡片
 - [x] **Phase 9**:嵌套子任务 — `tasks` 表加 `parent_task_id` + 索引;任务可拆解成子任务,子任务再可拆解(后端限制最多 5 层);子任务继承父任务的 `roleId`(避免跨职位污染);删除父任务时 BFS 收集所有后代一起进回收站,恢复时整树重建;前端通用 `SubtaskTree` 递归组件 — 顶层任务行加 ▶/▼ 展开按钮 + `N/M` 完成度徽章,展开后行内输入框「+ 添加子任务」直接 Enter 提交;3 处任务渲染(职位职责 tab、TodayView、WeeklyView)统一过滤 `!parentTaskId` 只显示顶层,子任务嵌在父任务展开里
+- [x] **Phase 10**:杂项 UX/逻辑修复 — ①Marketing 联动触发条件由「主摄 r1 完成」改为「修图师 r3 完成」;②联动 blog/IG/小红书 任务做成「更新blog/更新Instagram/更新婚礼小红书」三个周任务的显示层子任务(不写 DB,完成走 `linked|` key);③每个 tab 独立 URL(History API + Pages `_redirects` SPA 兜底),刷新不回今日待办;④今日待办/本周待办区域改可折叠卡片网格(对齐职位职责 UX);⑤**临时任务加截止日**:`TaskModal` 仅「临时」显示日期选择器,自动 `isWeekly=true` 进本周待办,职位职责行按紧急程度标色徽章;⑥**修临时任务完成语义**:完成 key 统一走 `lib/taskKey.ts`,临时任务用 `|once` 哨兵替代日期 → 完成一次永久完成(跨天不复活),配套一次性迁移 `migrations/2026-05-16-temp-task-once.sql`;⑦修 SubtaskTree 内部 `ckey` 未走共享 `taskCompletionKey` 导致「临时子任务勾不上但计数会变」的读写 key 不一致;⑧**今日待办按用户职位过滤**:`todayTasks` 加 `isVisibleRole(t.roleId)` 过滤(原来只靠 bootstrap 过滤,assistant 看到的今日待办仍可能混入非自己职位的任务),owner 不受影响(`isVisibleRole` 对 owner 恒真)
 
 ---
 
@@ -173,6 +174,18 @@ npx wrangler d1 execute studio_db --local --command "SELECT id, name FROM roles;
 - 顶层任务行加 `▶/▼ {done}/{total}` 徽章(数字只算直接子级,不深递归);展开后下面挂 `<SubtaskTree>` 显示所有后代树
 - 3 处统一过滤 `!parentTaskId`:职位职责 tab `roleTasks.filter` / TodayView 的 `todayTasks` 在主文件 filter 时排除 / WeeklyView 的 `weeklyTasks` 内部 filter
 - 完成度只看顶层任务,子任务自成进度(防止 N/M 受嵌套层级影响)
+
+**任务完成态 key(`lib/taskKey.ts`,唯一构造点)**
+- 这是个 load-bearing 不变量:勾选/统计/逾期判定**都必须**走 `taskCompletionKey(task, todayKey)`,否则同一任务"写入 key"与"读取 key"会对不上
+- 规则:项目联动 → 自带 `completionKey`;**临时任务 → `${id}|once`**(一次性,跨天不复活);每日/每周/每月 → `${id}|${todayKey}`(每天独立)
+- `bootstrap.ts` 除了查当天 `completion_date=todayKey`,**还要单独查 `completion_date='once'`** 把临时任务的一次性完成读回来
+- 历史数据迁移:`migrations/2026-05-16-temp-task-once.sql` 把临时任务旧的"按日期"完成行合并成单条 `'once'` 行(取最近一次完成),幂等可重跑
+
+**临时任务截止日(deadline)**
+- `due_date` 列早已存在,后端 POST/PATCH 已读写;本期补齐前端:`TaskModal` 仅当 `frequency==='临时'` 显示日期选择器
+- 保存临时任务时**强制 `isWeekly=true`**(进「本周待办」复用既有管线 + 颜色逻辑);切回非临时则清空 `dueDate` 并 `isWeekly=false`
+- 不进「今日待办」(产品决策);职位职责行显示按紧急度标色徽章(逾期/今天 红、≤3 天 橙、其余灰),复用 `due_*`/`overdue_n_days`/`in_n_days` i18n key
+- 每日/每周/每月**不支持** deadline(对循环任务无意义)
 
 **附件功能(任务/项目/相册)**
 - 存储:**Cloudflare R2** 桶 `studio-attachments`(免费 10 GB,零出站流量费),桶私有所有读写经 Worker

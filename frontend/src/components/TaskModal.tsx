@@ -11,6 +11,7 @@ type TaskPatch = {
   frequency: Frequency;
   duration: string;
   description: string;
+  dueDate: string | null; // 仅"临时"任务有意义,其余 frequency 一律 null
 };
 
 type Props = {
@@ -31,6 +32,7 @@ export default function TaskModal({ task, roles, defaultRoleId, parentId, attach
   const [frequency, setFrequency] = useState<Frequency>((task?.frequency as Frequency) || '每日');
   const [duration, setDuration] = useState(task?.duration != null ? String(task.duration) : '');
   const [description, setDescription] = useState(task?.description || '');
+  const [dueDate, setDueDate] = useState(task?.dueDate || '');
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -65,6 +67,18 @@ export default function TaskModal({ task, roles, defaultRoleId, parentId, attach
               <input type="number" value={duration} onChange={e => setDuration(e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg text-sm" />
             </div>
           </div>
+          {frequency === '临时' && (
+            <div>
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">{t('deadline_field')}</label>
+              <input
+                type="date"
+                value={dueDate}
+                onChange={e => setDueDate(e.target.value)}
+                className="w-full mt-1 px-3 py-2 border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg text-sm"
+              />
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{t('deadline_hint')}</p>
+            </div>
+          )}
           <p className="text-xs text-slate-500 dark:text-slate-400">{t('tip_project_task')}</p>
           <div>
             <label className="text-sm font-medium text-slate-700 dark:text-slate-300">{t('description_field')}</label>
@@ -74,7 +88,7 @@ export default function TaskModal({ task, roles, defaultRoleId, parentId, attach
         </div>
         <div className="flex gap-2 mt-5">
           <button onClick={onClose} className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">{t('cancel')}</button>
-          <button onClick={() => name.trim() && roleId && onSave({ name, roleId, frequency, duration, description })}
+          <button onClick={() => name.trim() && roleId && onSave({ name, roleId, frequency, duration, description, dueDate: frequency === '临时' ? (dueDate || null) : null })}
             disabled={!name.trim() || !roleId} className="flex-1 px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-800 disabled:opacity-50">{t('save')}</button>
         </div>
       </div>

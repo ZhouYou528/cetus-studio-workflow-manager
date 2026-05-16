@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { CalendarDays, Check, ChevronDown, ChevronRight, Edit2, Paperclip, Sparkles, Trash2 } from 'lucide-react';
 import SubtaskTree from '../components/SubtaskTree';
 import { useT } from '../lib/i18n';
+import { taskCompletionKey } from '../lib/taskKey';
 import type { Role, Task } from '../lib/types';
 
 type Props = {
@@ -21,6 +23,8 @@ type Props = {
 
 export default function WeeklyView({ tasks, roles, completions, todayKey, updateCompletions, splitTask, onEdit, onDelete, taskAttachmentCounts, childrenByParent, expandedTasks, toggleExpand, addSubtask }: Props) {
   const t = useT();
+  // 当前展开的职位区域(同一时间只展开一个,与职位职责 tab 行为一致;默认全部折叠)
+  const [expandedRoleId, setExpandedRoleId] = useState<string | null>(null);
   // 顶层周任务;子任务在父任务展开后通过 SubtaskTree 显示
   const weeklyTasks = tasks.filter(x => x.isWeekly && !x.parentTaskId);
 
@@ -34,12 +38,12 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
     tasksByRole[roleId].sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
   });
 
-  const completedCount = weeklyTasks.filter(x => completions[`${x.id}|${todayKey}`]).length;
+  const completedCount = weeklyTasks.filter(x => completions[taskCompletionKey(x, todayKey)]).length;
   const totalCount = weeklyTasks.length;
   const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
   const today = new Date(todayKey);
-  const overdueTasks = weeklyTasks.filter(x => x.dueDate && new Date(x.dueDate) < today && !completions[`${x.id}|${todayKey}`]);
+  const overdueTasks = weeklyTasks.filter(x => x.dueDate && new Date(x.dueDate) < today && !completions[taskCompletionKey(x, todayKey)]);
 
   const formatDueDate = (dateStr: string | null) => {
     if (!dateStr) return '';
@@ -115,16 +119,23 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
           <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">{t('weekly_empty_hint')}</p>
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {Object.keys(tasksByRole).map(roleId => {
             const role = roles.find(r => r.id === roleId);
             if (!role) return null;
             const roleTasks = tasksByRole[roleId];
-            const roleCompleted = roleTasks.filter(x => completions[`${x.id}|${todayKey}`]).length;
+            const roleCompleted = roleTasks.filter(x => completions[taskCompletionKey(x, todayKey)]).length;
+            const isRoleExpanded = expandedRoleId === roleId;
 
             return (
-              <div key={roleId} className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <div className="px-4 py-3 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
+              <div
+                key={roleId}
+                className={`bg-white dark:bg-slate-900 rounded-xl border overflow-hidden hover:shadow-md transition-shadow ${isRoleExpanded ? 'md:col-span-2 border-slate-300 dark:border-slate-600' : 'border-slate-200 dark:border-slate-700'}`}
+              >
+                <button
+                  onClick={() => setExpandedRoleId(isRoleExpanded ? null : roleId)}
+                  className="w-full px-4 py-3 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3 text-left"
+                >
                   <div className={`w-8 h-8 rounded-lg ${role.color} flex items-center justify-center text-base shrink-0`}>
                     {role.icon}
                   </div>
@@ -135,19 +146,23 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{t('n_completed_total', { done: roleCompleted, total: roleTasks.length })}</p>
                   </div>
-                  <div className="text-xs text-slate-400 dark:text-slate-500">
+                  <div className="text-xs text-slate-400 dark:text-slate-500 shrink-0">
                     {Math.round((roleCompleted / roleTasks.length) * 100)}%
                   </div>
-                </div>
+                  {isRoleExpanded
+                    ? <ChevronDown className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />
+                    : <ChevronRight className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />}
+                </button>
+                {isRoleExpanded && (
                 <div className="divide-y divide-slate-100 dark:divide-slate-700">
                   {roleTasks.map(x => {
-                    const completionKey = `${x.id}|${todayKey}`;
+                    const completionKey = taskCompletionKey(x, todayKey);
                     const isCompleted = !!completions[completionKey];
                     const priority = getPriorityFromDescription(x.description);
                     const attCount = taskAttachmentCounts?.[x.id] ?? 0;
                     const kids = childrenByParent?.[x.id] || [];
                     const childTotal = kids.length;
-                    const childDone = kids.filter(k => completions[`${k.id}|${todayKey}`]).length;
+                    const childDone = kids.filter(k => completions[taskCompletionKey(k, todayKey)]).length;
                     const isExpanded = expandedTasks?.has(x.id) ?? false;
 
                     return (
@@ -224,7 +239,7 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                               todayKey={todayKey}
                               level={1}
                               onToggleComplete={(task) => {
-                                const k = `${task.id}|${todayKey}`;
+                                const k = taskCompletionKey(task, todayKey);
                                 updateCompletions({ ...completions, [k]: !completions[k] });
                               }}
                               onEdit={onEdit}
@@ -237,6 +252,7 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                     );
                   })}
                 </div>
+                )}
               </div>
             );
           })}

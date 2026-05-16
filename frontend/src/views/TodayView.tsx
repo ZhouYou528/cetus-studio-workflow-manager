@@ -1,8 +1,10 @@
-import { AlertCircle, Check, CheckCircle2, ChevronDown, ChevronRight, Clock, ListTodo, Paperclip, Sparkles } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
+import { AlertCircle, Check, CheckCircle2, ChevronDown, ChevronRight, ListTodo, Paperclip, Sparkles } from 'lucide-react';
 import ProjectTaskCard from '../components/ProjectTaskCard';
 import SubtaskTree from '../components/SubtaskTree';
 import { useT } from '../lib/i18n';
 import { useLocale } from '../lib/prefs';
+import { taskCompletionKey } from '../lib/taskKey';
 import type { Role, Task } from '../lib/types';
 
 // 'project task' 在这里指 ProjectCard / AlbumCard 衍生出来的可完成项,形状由
@@ -53,6 +55,8 @@ export default function TodayView({
 }: Props) {
   const t = useT();
   const [locale] = useLocale();
+  // 当前展开的区域(同一时间只展开一个,与职位职责 tab 行为一致;默认全部折叠)
+  const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const today = new Date().toISOString().split('T')[0];
   const overdueTasks = projectTasks.filter(t => t.dueDate < today);
   const todayDueTasks = projectTasks.filter(t => t.dueDate === today);
@@ -88,12 +92,12 @@ export default function TodayView({
   const renderDailyTask = (task: Task & { completionKey?: string }) => {
     const role = roles.find(r => r.id === task.roleId);
     const isLinked = task.frequency === '项目联动';
-    const completionKey = isLinked ? (task.completionKey as string) : `${task.id}|${todayKey}`;
+    const completionKey = taskCompletionKey(task, todayKey);
     const isCompleted = !!completions[completionKey];
     const attCount = taskAttachmentCounts?.[task.id] ?? 0;
     const kids = childrenByParent?.[task.id] || [];
     const childTotal = kids.length;
-    const childDone = kids.filter(k => completions[`${k.id}|${todayKey}`]).length;
+    const childDone = kids.filter(k => completions[taskCompletionKey(k, todayKey)]).length;
     const isExpanded = expandedTasks?.has(task.id) ?? false;
     const canExpand = !isLinked && toggleExpand && childrenByParent && addSubtask;
     return (
@@ -153,7 +157,7 @@ export default function TodayView({
               todayKey={todayKey}
               level={1}
               onToggleComplete={(sub) => {
-                const k = `${sub.id}|${todayKey}`;
+                const k = taskCompletionKey(sub, todayKey);
                 updateCompletions({ ...completions, [k]: !completions[k] });
               }}
               onEdit={(sub) => onEditTask?.(sub)}
@@ -174,6 +178,93 @@ export default function TodayView({
   const hasAnyTasks = todayTasks.length > 0 || projectTasks.length > 0;
   const dateStr = new Date().toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
 
+  // 每个"区域"做成可折叠卡片;折叠时网格每行两个,展开时占满整行(UX 对齐职位职责 tab)。
+  type Section = {
+    id: string;
+    icon: ReactNode;
+    iconBg: string;
+    cardAccent: string;
+    title: string;
+    titleClass?: string;
+    desc?: string;
+    done: number;
+    total: number;
+    body: ReactNode;
+  };
+  const sections: Section[] = [];
+
+  if (overdueTasks.length > 0) {
+    sections.push({
+      id: 'overdue',
+      icon: <AlertCircle className="w-5 h-5 text-rose-600 dark:text-rose-400" />,
+      iconBg: 'bg-rose-100 dark:bg-rose-900/60',
+      cardAccent: 'border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20',
+      title: t('today_overdue_with_count', { n: overdueTasks.length }),
+      titleClass: 'text-rose-700 dark:text-rose-300',
+      done: overdueTasks.filter(task => isTaskCompleted(task)).length,
+      total: overdueTasks.length,
+      body: (
+        <div className="space-y-2">
+          {overdueTasks.map(task => (
+            <ProjectTaskCard key={task.completionKey} task={task as never} roles={roles} isOverdue
+              isCompleted={isTaskCompleted(task)} onToggle={() => toggleProjectOrAlbum(task)} onSplit={splitTask as never} />
+          ))}
+        </div>
+      ),
+    });
+  }
+
+  TIME_SLOTS.forEach(slot => {
+    const dailyInSlot = slotDailyTasks[slot.id] || [];
+    const projectsInSlot = slotProjectTasks[slot.id] || [];
+    const totalInSlot = dailyInSlot.length + projectsInSlot.length;
+    const completedInSlot =
+      dailyInSlot.filter(task => completions[taskCompletionKey(task, todayKey)]).length +
+      projectsInSlot.filter(task => isTaskCompleted(task)).length;
+    sections.push({
+      id: slot.id,
+      icon: <span className="text-xl">{slot.icon}</span>,
+      iconBg: slot.iconBg,
+      cardAccent: `${slot.borderColor} ${slot.bgColor}`,
+      title: t(slot.labelKey),
+      desc: t(slot.descKey),
+      done: completedInSlot,
+      total: totalInSlot,
+      body: totalInSlot === 0 ? (
+        <div className="bg-white/60 dark:bg-slate-800/60 rounded-lg p-3 text-center">
+          <p className="text-xs text-slate-500 dark:text-slate-400">{t('no_tasks_in_slot')}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {projectsInSlot.map(task => renderProjectTask(task))}
+          {dailyInSlot.map(task => renderDailyTask(task))}
+        </div>
+      ),
+    });
+  });
+
+  if (otherDailyTasks.length > 0 || otherProjectTasks.length > 0) {
+    const flexDone =
+      otherDailyTasks.filter(task => completions[taskCompletionKey(task, todayKey)]).length +
+      otherProjectTasks.filter(task => isTaskCompleted(task)).length;
+    sections.push({
+      id: 'flex',
+      icon: <ListTodo className="w-5 h-5 text-slate-600 dark:text-slate-300" />,
+      iconBg: 'bg-slate-100 dark:bg-slate-800',
+      cardAccent: 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900',
+      title: t('today_flex_label_with_count', { n: otherDailyTasks.length + otherProjectTasks.length }),
+      desc: t('today_flex_hint'),
+      done: flexDone,
+      total: otherDailyTasks.length + otherProjectTasks.length,
+      body: (
+        <div className="space-y-2">
+          {otherProjectTasks.map(task => renderProjectTask(task))}
+          {otherDailyTasks.map(task => renderDailyTask(task))}
+        </div>
+      ),
+    });
+  }
+
   return (
     <div>
       <div className="mb-5">
@@ -181,89 +272,46 @@ export default function TodayView({
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{dateStr}</p>
       </div>
 
-      {overdueTasks.length > 0 && (
-        <div className="mb-5">
-          <div className="flex items-center gap-2 mb-2.5">
-            <AlertCircle className="w-4 h-4 text-rose-500" />
-            <h3 className="text-sm font-semibold text-rose-600">{t('today_overdue_with_count', { n: overdueTasks.length })}</h3>
-          </div>
-          <div className="space-y-2">
-            {overdueTasks.map(task => (
-              <ProjectTaskCard key={task.completionKey} task={task as never} roles={roles} isOverdue
-                isCompleted={isTaskCompleted(task)} onToggle={() => toggleProjectOrAlbum(task)} onSplit={splitTask as never} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="mb-5">
-        <div className="flex items-center gap-2 mb-3">
-          <Clock className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-          <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">{t('today_timeline')}</h3>
-        </div>
-        <div className="space-y-3">
-          {TIME_SLOTS.map(slot => {
-            const dailyInSlot = slotDailyTasks[slot.id] || [];
-            const projectsInSlot = slotProjectTasks[slot.id] || [];
-            const totalInSlot = dailyInSlot.length + projectsInSlot.length;
-            const completedInSlot =
-              dailyInSlot.filter(task => completions[task.frequency === '项目联动' ? ((task as Task & { completionKey?: string }).completionKey as string) : `${task.id}|${todayKey}`]).length +
-              projectsInSlot.filter(task => isTaskCompleted(task)).length;
-
-            return (
-              <div key={slot.id} className={`rounded-xl border-2 ${slot.borderColor} ${slot.bgColor} overflow-hidden`}>
-                <div className="px-4 py-3 flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-lg ${slot.iconBg} flex items-center justify-center text-xl shrink-0`}>
-                    {slot.icon}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h4 className="font-semibold text-slate-900 dark:text-slate-100 text-sm">{t(slot.labelKey)}</h4>
-                      {totalInSlot > 0 && (
-                        <span className="text-xs px-2 py-0.5 bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 rounded-full font-medium">
-                          {completedInSlot}/{totalInSlot}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">{t(slot.descKey)}</p>
-                  </div>
-                </div>
-                <div className="px-3 pb-3">
-                  {totalInSlot === 0 ? (
-                    <div className="bg-white/60 dark:bg-slate-800/60 rounded-lg p-3 text-center">
-                      <p className="text-xs text-slate-500 dark:text-slate-400">{t('no_tasks_in_slot')}</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {projectsInSlot.map(task => renderProjectTask(task))}
-                      {dailyInSlot.map(task => renderDailyTask(task))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {(otherDailyTasks.length > 0 || otherProjectTasks.length > 0) && (
-        <div className="mb-5">
-          <div className="flex items-center gap-2 mb-2.5">
-            <ListTodo className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">{t('today_flex_label_with_count', { n: otherDailyTasks.length + otherProjectTasks.length })}</h3>
-            <span className="text-xs text-slate-400 dark:text-slate-500">— {t('today_flex_hint')}</span>
-          </div>
-          <div className="space-y-2">
-            {otherProjectTasks.map(task => renderProjectTask(task))}
-            {otherDailyTasks.map(task => renderDailyTask(task))}
-          </div>
-        </div>
-      )}
-
-      {!hasAnyTasks && (
+      {!hasAnyTasks ? (
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-dashed border-slate-300 dark:border-slate-600 p-12 text-center">
           <CheckCircle2 className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
           <p className="text-slate-500 dark:text-slate-400">{t('today_empty')}</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {sections.map(s => {
+            const isExpanded = expandedSection === s.id;
+            return (
+              <div
+                key={s.id}
+                className={`rounded-xl border-2 ${s.cardAccent} overflow-hidden hover:shadow-md transition-shadow ${isExpanded ? 'md:col-span-2' : ''}`}
+              >
+                <button
+                  onClick={() => setExpandedSection(isExpanded ? null : s.id)}
+                  className="w-full px-4 py-3 flex items-center gap-3 text-left"
+                >
+                  <div className={`w-10 h-10 rounded-lg ${s.iconBg} flex items-center justify-center shrink-0`}>
+                    {s.icon}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className={`font-semibold text-sm ${s.titleClass ?? 'text-slate-900 dark:text-slate-100'}`}>{s.title}</h4>
+                      {s.total > 0 && (
+                        <span className="text-xs px-2 py-0.5 bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 rounded-full font-medium">
+                          {s.done}/{s.total}
+                        </span>
+                      )}
+                    </div>
+                    {s.desc && <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5 truncate">{s.desc}</p>}
+                  </div>
+                  {isExpanded
+                    ? <ChevronDown className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />
+                    : <ChevronRight className="w-4 h-4 text-slate-400 dark:text-slate-500 shrink-0" />}
+                </button>
+                {isExpanded && <div className="px-3 pb-3">{s.body}</div>}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
