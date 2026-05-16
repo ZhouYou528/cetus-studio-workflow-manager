@@ -55,7 +55,7 @@ export default function ProjectTaskCard({ task, roles, isOverdue, isCompleted, o
       isAlbum ? 'border-amber-200 bg-amber-50/20' : 'border-blue-200 bg-blue-50/20'
     }`}>
       <div className="flex items-center gap-3">
-        <button onClick={onToggle} className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 dark:border-slate-600'}`}>
+        <button onClick={onToggle} className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500 task-done' : 'border-slate-300 dark:border-slate-600'}`}>
           {isCompleted && <Check className="w-3.5 h-3.5 text-white" />}
         </button>
         <div className={`w-8 h-8 rounded-lg ${role?.color || 'bg-slate-400'} flex items-center justify-center text-sm shrink-0`}>{role?.icon}</div>

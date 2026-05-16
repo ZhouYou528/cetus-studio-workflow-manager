@@ -2,3 +2,71 @@
 
 /* Tailwind v4 启用 class 策略的 dark mode:html.dark { ... } 内的元素生效 */
 @custom-variant dark (&:where(.dark, .dark *));
+
+/* ── 主题强调色(由 lib/theme.ts 按周写入 :root,这里是兜底默认)── */
+:root {
+  --th-primary: #ee1515;
+  --th-primary-rgb: 238, 21, 21;
+  /* 精灵球固定配色(宝可梦主题 logo 用,原创手绘) */
+  --pkmn-red: #ee1515;
+  --pkmn-ink: #1b1b1b;
+  --pkmn-white: #f7f7f7;
+}
+
+/* 任务完成微动效(方案 A):勾选时圆圈泛一圈光 + 勾号弹入。
+   .task-done 类只在 isCompleted 时挂在圆圈按钮上,所以 CSS 动画在
+   "未完成→完成"那次切换(以及已完成时首次挂载)各播放一次,重渲染不重播。
+   主题化:完成态由原 emerald 覆盖为当周主题强调色 var(--th-primary)
+   (用共享 .task-done 类,不必动 7 处写死的 className)。 */
+@keyframes task-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(var(--th-primary-rgb), 0.45); }
+  100% { box-shadow: 0 0 0 8px rgba(var(--th-primary-rgb), 0); }
+}
+@keyframes task-check {
+  0%   { transform: scale(0) rotate(-25deg); opacity: 0; }
+  55%  { transform: scale(1.25) rotate(0deg); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.task-done {
+  animation: task-ring 0.45s ease-out;
+  background-color: var(--th-primary) !important;
+  border-color: var(--th-primary) !important;
+}
+.task-done svg { animation: task-check 0.35s cubic-bezier(0.18, 0.89, 0.32, 1.28); }
+
+@media (prefers-reduced-motion: reduce) {
+  .task-done, .task-done svg { animation: none; }
+}
+
+/* ── 纯 CSS 精灵球(用于 logo + 加载动画),尺寸跟随元素 ── */
+.pkmn-ball {
+  position: relative;
+  border-radius: 50%;
+  overflow: hidden;
+  background: linear-gradient(var(--pkmn-white) 0 50%, var(--pkmn-white) 50% 100%);
+  border: 2px solid var(--pkmn-ink);
+  box-sizing: border-box;
+}
+.pkmn-ball::before { /* 上半红 + 中间黑带 */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(var(--pkmn-ink) 0 0) center / 100% 16% no-repeat,
+    linear-gradient(var(--pkmn-red) 0 0) top / 100% 50% no-repeat;
+}
+.pkmn-ball::after { /* 中心按钮 */
+  content: "";
+  position: absolute;
+  width: 32%;
+  height: 32%;
+  left: 34%;
+  top: 34%;
+  background: var(--pkmn-white);
+  border: 2px solid var(--pkmn-ink);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+@keyframes pkmn-spin { to { transform: rotate(360deg); } }
+.pkmn-spin { animation: pkmn-spin 0.9s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .pkmn-spin { animation: none; } }

@@ -1,6 +1,6 @@
 // @ts-nocheck — Artifact 原始 UI 代码。Phase 5 已把数据层从 window.storage 切到 API,
 // 但组件代码仍保持 JS 风格;Phase 6 拆组件 + 加类型时移除此 pragma。
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { api, ApiError } from './lib/api';
 import { Camera, Users, ListTodo, Bell, BarChart3, Plus, Edit2, Trash2, Check, X, ChevronDown, ChevronRight, Clock, AlertCircle, CheckCircle2, Calendar, Briefcase, Sparkles, Loader2, FolderOpen, MapPin, User, CalendarDays, Archive, LogOut, UserCog, Paperclip } from 'lucide-react';
 import ConfirmDialog from './components/ConfirmDialog';
@@ -20,6 +20,8 @@ import HeaderControls from './components/HeaderControls';
 import SubtaskTree from './components/SubtaskTree';
 import { useT } from './lib/i18n';
 import { taskCompletionKey } from './lib/taskKey';
+import { celebrateAllDone } from './lib/celebrate';
+import { useActiveTheme } from './lib/theme';
 
 const DEFAULT_ROLES = [
   { id: 'r1', name: '主摄影师', icon: '📸', isAssistant: false, supportsProjects: true, duties: '负责拍摄方案制定、现场拍摄主导、把控整体画面质量、与客户沟通拍摄需求', color: 'bg-blue-500' },
@@ -128,6 +130,7 @@ function readTabFromUrl(): string {
 
 export default function StudioWorkflowManager() {
   const ti = useT();
+  const theme = useActiveTheme(); // 当前生效主题(每周轮换,或手动覆盖),换主题自动重渲染
   const [activeTab, setActiveTabState] = useState<string>(() => readTabFromUrl());
   // 切 tab 同时更新 URL,让浏览器前进/后退可用,刷新还原。
   const setActiveTab = (tab: string) => {
@@ -663,6 +666,25 @@ export default function StudioWorkflowManager() {
     return completions[key];
   }).length;
 
+  // 方案 B:今日待办从"未清空"跨越到"全部完成"那一刻 → 彩带 + 横幅。
+  // prevAllDoneRef 首跑只记基线(开页就已全完成时不放炮);total=0 不触发。
+  const [showDoneBanner, setShowDoneBanner] = useState(false);
+  const prevAllDoneRef = useRef(null);
+  useEffect(() => {
+    const total = todayTasks.length;
+    const allDone = total > 0 && completedToday === total;
+    if (prevAllDoneRef.current === null) {
+      prevAllDoneRef.current = allDone;
+      return;
+    }
+    if (allDone && !prevAllDoneRef.current) {
+      celebrateAllDone();
+      setShowDoneBanner(true);
+      setTimeout(() => setShowDoneBanner(false), 3500);
+    }
+    prevAllDoneRef.current = allDone;
+  }, [completedToday, todayTasks.length]);
+
   const getTodayProjectTasks = () => {
     const today = new Date().toISOString().split('T')[0];
     const result = [];
@@ -702,23 +724,41 @@ export default function StudioWorkflowManager() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 dark:from-slate-950 to-slate-100 dark:to-slate-900 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-slate-400 dark:text-slate-500" />
+        {theme.pokeball
+          ? <div className="w-14 h-14 pkmn-ball pkmn-spin" aria-label="loading" />
+          : <span className="text-4xl pkmn-spin inline-block" aria-label="loading">{theme.logo}</span>}
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 dark:from-slate-950 to-slate-100 dark:to-slate-900">
+      {showDoneBanner && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] px-5 py-3 rounded-full bg-emerald-500 text-white text-sm font-semibold shadow-lg shadow-emerald-500/30 animate-[task-check_0.4s_cubic-bezier(0.18,0.89,0.32,1.28)]">
+          {ti('celebrate_today_done')}
+        </div>
+      )}
       <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-30 shadow-sm">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 py-3 sm:py-4">
           <div className="flex items-center justify-between mb-3 sm:mb-4 gap-2">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-              <div className="w-9 h-9 sm:w-10 sm:h-10 bg-gradient-to-br from-slate-800 to-slate-600 rounded-xl flex items-center justify-center shrink-0">
-                <Camera className="w-5 h-5 text-white" />
-              </div>
+              {theme.pokeball ? (
+                <div className="w-9 h-9 sm:w-10 sm:h-10 pkmn-ball shrink-0" aria-label="logo" />
+              ) : (
+                <div
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shrink-0 text-xl sm:text-2xl"
+                  style={{ backgroundColor: 'rgba(var(--th-primary-rgb), 0.15)' }}
+                  aria-label="logo"
+                >
+                  {theme.logo}
+                </div>
+              )}
               <div className="min-w-0">
                 <h1 className="text-base sm:text-xl font-bold text-slate-900 dark:text-slate-100 truncate">{ti('app_title')}</h1>
-                <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">{ti('app_subtitle_with_counts', { roles: roles.length, projects: projects.length })}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
+                  {ti('app_subtitle_with_counts', { roles: roles.length, projects: projects.length })}
+                  <span className="ml-1.5 text-slate-400 dark:text-slate-500">· {theme.logo || '🔴'} {ti(('theme_' + theme.id) as never)}</span>
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-1.5 sm:gap-3 text-sm shrink-0">
@@ -731,7 +771,7 @@ export default function StudioWorkflowManager() {
                   <circle cx="50%" cy="50%" r="40%" stroke="currentColor" strokeWidth="3" fill="none" className="text-slate-200 dark:text-slate-700" />
                   <circle cx="50%" cy="50%" r="40%" stroke="currentColor" strokeWidth="3" fill="none" pathLength={100}
                     strokeDasharray={`${todayTasks.length > 0 ? (completedToday/todayTasks.length) * 100 : 0} 100`}
-                    className="text-emerald-500 transition-all" />
+                    className="transition-all" style={{ color: 'var(--th-primary)' }} />
                 </svg>
                 <span className="text-[10px] sm:text-xs font-bold text-slate-700 dark:text-slate-300">
                   {todayTasks.length > 0 ? Math.round((completedToday/todayTasks.length) * 100) : 0}%
@@ -1144,7 +1184,7 @@ export default function StudioWorkflowManager() {
                                   <div key={t.id} className={`bg-white dark:bg-slate-900 rounded-lg ${isLinked ? 'border border-rose-200 bg-rose-50/30' : (isToday && !isCompleted ? 'border border-blue-200' : '')}`}>
                                     <div className="p-2.5 flex items-start gap-2.5">
                                     <button onClick={(e) => { e.stopPropagation(); updateCompletions({ ...completions, [completionKey]: !isCompleted }); }}
-                                      className={`w-5 h-5 mt-0.5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                                      className={`w-5 h-5 mt-0.5 rounded-full border-2 flex items-center justify-center shrink-0 ${isCompleted ? 'bg-emerald-500 border-emerald-500 task-done' : 'border-slate-300 dark:border-slate-600'}`}>
                                       {isCompleted && <Check className="w-3 h-3 text-white" />}
                                     </button>
                                     <div className="flex-1 min-w-0">

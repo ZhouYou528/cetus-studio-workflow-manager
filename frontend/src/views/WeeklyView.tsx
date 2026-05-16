@@ -171,7 +171,7 @@ export default function WeeklyView({ tasks, roles, completions, todayKey, update
                         <button
                           onClick={() => updateCompletions({ ...completions, [completionKey]: !isCompleted })}
                           className={`w-5 h-5 mt-0.5 rounded-full border-2 flex items-center justify-center shrink-0 transition ${
-                            isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 dark:border-slate-600 hover:border-slate-500'
+                            isCompleted ? 'bg-emerald-500 border-emerald-500 task-done' : 'border-slate-300 dark:border-slate-600 hover:border-slate-500'
                           }`}
                         >
                           {isCompleted && <Check className="w-3 h-3 text-white" />}

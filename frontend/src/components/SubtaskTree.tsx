@@ -104,7 +104,7 @@ function SubtaskRow({ task, childrenByParent, taskAttachmentCounts, completions,
         <button
           onClick={() => onToggleComplete(task)}
           className={`w-4 h-4 mt-0.5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-            isCompleted ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300 dark:border-slate-600'
+            isCompleted ? 'bg-emerald-500 border-emerald-500 task-done' : 'border-slate-300 dark:border-slate-600'
           }`}
         >
           {isCompleted && <Check className="w-2.5 h-2.5 text-white" />}
